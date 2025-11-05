@@ -5,7 +5,7 @@ from datetime import timedelta
 app = FastAPI(title="Canteen Recommendation API")
 
 # Load dataset
-df = pd.read_csv(r"C:\Users\HP\Downloads\Canteen Recommendation System\ML\Data\raw\mock_canteen_orders.csv", parse_dates=["timestamp"])
+df = pd.read_csv("ML\Data\raw\mock_canteen_orders.csv", parse_dates=["timestamp"])
 
 # --- Recommender Logic ---
 def get_recommendations(df, mode="popular", top_n=5):
