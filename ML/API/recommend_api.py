@@ -26,20 +26,29 @@ MODEL_PATH = (ML_DIR / "Model" / "trained_model.pkl").resolve()
 # Load orders CSV
 def load_orders() -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
+
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df = df.dropna(subset=["timestamp"])   # ✅ Drop invalid timestamps
+
     return df
+
+
 
 
 # Popularity-based recommender
 def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
-    if days and "timestamp" in df.columns:
+    if days and "timestamp" in df.columns and pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
         cutoff = pd.Timestamp.utcnow() - timedelta(days=days)
-        df = df[df["timestamp"] >= cutoff]
+
+        df = df[df["timestamp"].notna()]     # ✅ Remove bad timestamps
+        df = df[df["timestamp"] >= cutoff]   # ✅ Safe filtering
 
     counts = df["item_name"].value_counts().reset_index()
     counts.columns = ["item_name", "order_count"]
+
     return counts.head(top_n).to_dict(orient="records")
+
 
 
 # Try personalized (Phase 2)
