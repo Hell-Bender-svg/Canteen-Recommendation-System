@@ -54,7 +54,8 @@ async def chat_endpoint(request: ChatRequest):
     contents_for_gemini = [
         types.Content(
             role=msg.role,
-            parts=[types.Part.from_text(p.text) for p in msg.parts]
+            parts=[types.Part(text=p.text) for p in msg.parts]
+
         )
         for msg in request.history
     ]
@@ -63,7 +64,7 @@ async def chat_endpoint(request: ChatRequest):
     contents_for_gemini.append(
         types.Content(
             role="user",
-            parts=[types.Part.from_text(request.new_message)]
+            parts=[types.Part(text=request.new_message)]
         )
     )
 
