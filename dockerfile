@@ -24,4 +24,4 @@ EXPOSE 8000
 # Specify the command to run the application when the container starts.
 # Use the exec form (array syntax) for better performance and signal handling.
 # Replace 'app.py' with your primary script name.
-CMD ["python", "recommend_for_user.py"]
+CMD ["uvicorn", "recommend_api:app", "--host", "0.0.0.0", "--port", "8000"]
