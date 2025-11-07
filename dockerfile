@@ -18,4 +18,4 @@ EXPOSE 8000
 
 # DEFAULT: Run the ML recommender service
 # If you want to run chat_api_service instead, see notes below
-CMD ["uvicorn", "chat_api_service:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
