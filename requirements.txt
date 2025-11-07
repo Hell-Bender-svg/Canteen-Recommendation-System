@@ -9,3 +9,4 @@ typing
 google
 gunicorn
 python-dotenv
+google-genai
