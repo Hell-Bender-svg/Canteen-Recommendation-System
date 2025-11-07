@@ -1,1 +1,1 @@
-web: uvicorn ML.API.recommend_api:app --host 0.0.0.0 --port $PORT
+web: gunicorn chat_api_service:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
