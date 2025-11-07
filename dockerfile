@@ -1,17 +1,18 @@
-# 1. Use an official Python image
-FROM python:3.10-slim
+# Base image
+FROM python:3.11-slim
 
-# 2. Set the working directory in the container
 WORKDIR /app
 
-# 3. Copy project files into the container
-COPY . /app
+# Copy requirements first
+COPY requirements.txt .
 
-# 4. Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 5. Expose the port that your FastAPI runs on
+# Copy entire project
+COPY . .
+
+# Expose FastAPI port
 EXPOSE 8000
 
-# 6. Start the server
+# Run the API (correct module path)
 CMD ["uvicorn", "ML.API.recommend_api:app", "--host", "0.0.0.0", "--port", "8000"]
