@@ -33,12 +33,22 @@ def load_orders() -> pd.DataFrame:
 
 def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
     if days and "timestamp" in df.columns and pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
-        cutoff = pd.Timestamp.utcnow() - timedelta(days=days)
+        
+        # ✅ Create timezone-naive cutoff
+        cutoff = (pd.Timestamp.utcnow() - timedelta(days=days)).tz_localize(None)
+
+        # ✅ Ensure timestamps are valid & tz-naive
         df = df[df["timestamp"].notna()]
+        df["timestamp"] = df["timestamp"].dt.tz_localize(None)
+
+        # ✅ Safe comparison
         df = df[df["timestamp"] >= cutoff]
+
     counts = df["item_name"].value_counts().reset_index()
     counts.columns = ["item_name", "order_count"]
+
     return counts.head(top_n).to_dict(orient="records")
+
 
 
 
