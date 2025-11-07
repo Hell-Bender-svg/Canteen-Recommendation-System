@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
-import uvicorn
+
 
 # Load environment variables (GEMINI_API_KEY)
 load_dotenv() 
