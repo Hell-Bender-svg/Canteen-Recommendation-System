@@ -7,3 +7,5 @@ joblib
 pydantic
 typing
 google
+gunicorn
+python-dotenv
