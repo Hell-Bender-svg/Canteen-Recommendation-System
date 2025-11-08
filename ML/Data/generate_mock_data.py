@@ -1,4 +1,3 @@
-# ml/data/generate_mock_data.py
 import os
 import csv
 import random
@@ -21,9 +20,9 @@ items = [
     {"id": "D10", "name": "Shake", "category": "Beverage", "price": 70}
 ]
 
-users = [f"U{i:03}" for i in range(1, 201)]  # 200 users
+users = [f"U{i:03}" for i in range(1, 201)]  
 start_date = datetime(2025, 10, 1)
-num_orders = 1200  # change as needed
+num_orders = 1200  
 
 with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(f, fieldnames=[
@@ -33,7 +32,6 @@ with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     for i in range(num_orders):
         user = random.choice(users)
-        # weighted choice to make popularity realistic
         item = random.choices(items, weights=[10,15,20,9,8,7,6,11,5,4], k=1)[0]
         qty = random.choices([1,1,1,2,3], weights=[60,20,15,4,1], k=1)[0]
         date = start_date + timedelta(days=random.randint(0,34),

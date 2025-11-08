@@ -1,4 +1,3 @@
-# ml/data/validate_data.py
 import pandas as pd
 import os
 fn = os.path.join(os.path.dirname(__file__), "raw", "mock_canteen_orders.csv")

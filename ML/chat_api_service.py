@@ -7,12 +7,9 @@ from google import genai
 from google.genai import types
 from fastapi.middleware.cors import CORSMiddleware
 
-# ---------------------------------------------------------
-# ✅ 1. FastAPI + CORS
-# ---------------------------------------------------------
 app = FastAPI(
     title="Gemini Conversational API",
-    description="Canteen-aware chatbot with menu + recommendations."
+    description="Canteen-aware chatbot with menu."
 )
 
 app.add_middleware(
@@ -25,9 +22,6 @@ app.add_middleware(
 
 load_dotenv()
 
-# ---------------------------------------------------------
-# ✅ 2. Canteen Menu
-# ---------------------------------------------------------
 CANTEEN_MENU = """
 Available items in our University Canteen:
 
@@ -62,9 +56,6 @@ RULES:
 5. Never invent dishes or extra details.
 """
 
-# ---------------------------------------------------------
-# ✅ 3. Pydantic Models
-# ---------------------------------------------------------
 class Part(BaseModel):
     text: str
 
@@ -80,33 +71,20 @@ class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
 
-
-# ---------------------------------------------------------
-# ✅ 4. Initialize Gemini Client
-# ---------------------------------------------------------
 try:
     gemini_client = genai.Client()
     GEMINI_MODEL = "gemini-2.5-flash"
-except Exception as e:
+except Exception:
     gemini_client = None
-    print("Gemini initialization failed:", e)
 
-
-# ---------------------------------------------------------
-# ✅ 5. Chat Endpoint
-# ---------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
 
     if not gemini_client:
-        raise HTTPException(
-            status_code=503,
-            detail="AI service unavailable"
-        )
+        raise HTTPException(503, "AI service unavailable")
 
     conversation = []
 
-    # ✅ Inject system prompt AS A USER (Gemini requires valid role)
     conversation.append(
         types.Content(
             role="user",
@@ -114,7 +92,6 @@ async def chat_endpoint(request: ChatRequest):
         )
     )
 
-    # ✅ Convert chat history
     for msg in request.history:
         conversation.append(
             types.Content(
@@ -123,7 +100,6 @@ async def chat_endpoint(request: ChatRequest):
             )
         )
 
-    # ✅ Add new user message
     conversation.append(
         types.Content(
             role="user",
@@ -132,7 +108,6 @@ async def chat_endpoint(request: ChatRequest):
     )
 
     try:
-        # ✅ Generate reply from Gemini
         ai_response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=conversation
@@ -145,20 +120,11 @@ async def chat_endpoint(request: ChatRequest):
             Content(role="model", parts=[Part(text=reply_text)])
         ]
 
-        return ChatResponse(
-            reply=reply_text,
-            updated_history=updated_history
-        )
+        return ChatResponse(reply=reply_text, updated_history=updated_history)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Gemini API error: {e}"
-        )
+        raise HTTPException(500, f"Gemini API error: {e}")
 
-# ---------------------------------------------------------
-# ✅ 6. Test Endpoint
-# ---------------------------------------------------------
 @app.get("/")
 def home():
     return {"message": "Canteen Chatbot API running ✅", "docs": "/chat/docs"}
