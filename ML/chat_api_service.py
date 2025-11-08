@@ -8,7 +8,6 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 from typing import List
-
 from ML.API.recommend_api import load_orders, get_popular
 
 load_dotenv()
@@ -28,30 +27,27 @@ app.add_middleware(
 
 MENU_PATH = "ML/Data/raw/menu.csv"
 
-
 def load_menu():
     df = pd.read_csv(MENU_PATH)
     df["available"] = df["available"].astype(str).str.lower().isin(["yes", "true", "1"])
     return df
 
-
-MENU_DF = load_menu()
-
-
-def menu_to_text(df):
+def get_menu_text():
+    df = load_menu()
     return "\n".join([f"- {row['item_name']} — ₹{row['price']}" for _, row in df.iterrows()])
 
+def get_daily_stock():
+    df = load_menu()
+    return {row["item_name"]: row["available"] for _, row in df.iterrows()}
 
-CANTEEN_MENU_TEXT = menu_to_text(MENU_DF)
+def get_daily_specials():
+    df = load_menu()
+    return df.sample(min(2, len(df)))["item_name"].tolist()
 
-DAILY_STOCK = {row["item_name"]: row["available"] for _, row in MENU_DF.iterrows()}
-
-DAILY_SPECIALS = MENU_DF.sample(2)["item_name"].tolist()
-
-ORDER_DATA = load_orders()
-POPULARITY_DATA = get_popular(ORDER_DATA, top_n=10)
-POPULARITY_RANK = {entry["item_name"]: idx + 1 for idx, entry in enumerate(POPULARITY_DATA)}
-
+def get_popularity_rank():
+    df = load_orders()
+    pop = get_popular(df, top_n=10)
+    return {entry["item_name"]: idx + 1 for idx, entry in enumerate(pop)}
 
 def detect_mood(text):
     t = text.lower()
@@ -61,25 +57,20 @@ def detect_mood(text):
     if any(k in t for k in ["hungry", "starving"]): return "hungry"
     return None
 
-
 class Part(BaseModel):
     text: str
-
 
 class Content(BaseModel):
     role: str = Field(..., pattern="^(user|model)$")
     parts: List[Part]
 
-
 class ChatRequest(BaseModel):
     history: List[Content]
     new_message: str
 
-
 class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
-
 
 try:
     gemini_client = genai.Client()
@@ -87,50 +78,50 @@ try:
 except Exception:
     gemini_client = None
 
-
 def build_system_prompt(user_message):
+    menu_text = get_menu_text()
+    stock = get_daily_stock()
+    specials = get_daily_specials()
+    pop_rank = get_popularity_rank()
     mood = detect_mood(user_message)
-
     mood_hint = {
         "tired": "User is tired. Suggest energy boosters like Cold Coffee.",
         "hungry": "User is extremely hungry. Suggest filling meals like Veg Thali or Paneer Thali.",
-        "sad": "User is sad. Suggest mood-lifting comfort foods like Maggi or Samosa.",
-        "angry": "User is irritated. Suggest quick-served food like Samosa.",
+        "sad": "User is sad. Suggest comfort foods like Maggi or Samosa.",
+        "angry": "User is irritated. Suggest quick-served items like Samosa.",
     }.get(mood, "")
 
     return f"""
 You are the official Canteen AI Assistant.
 
 MENU:
-{CANTEEN_MENU_TEXT}
+{menu_text}
 
 STOCK STATUS:
-{DAILY_STOCK}
+{stock}
 
 POPULAR ITEMS:
-{POPULARITY_RANK}
+{pop_rank}
 
 TODAY'S SPECIALS:
-{DAILY_SPECIALS}
+{specials}
 
 MOOD HINT:
 {mood_hint}
 
-BEHAVIOR RULES:
-- For greetings like "hi", "hello", "how are you", respond friendly & conversational.
-- For dish availability: check stock and respond accordingly.
-- For out of stock items: say they are currently unavailable.
-- For recommendations: reply EXACTLY this JSON:
+RULES:
+- For greetings respond friendly.
+- For availability check stock.
+- For out-of-stock say unavailable.
+- For recommendations respond EXACTLY in JSON:
   {{"action": "recommend", "query": "<user message>"}}
-- If a user asks about an item not in the menu: respond "Sorry, that item is not available in our canteen."
+- If item not in menu say unavailable.
 - Never invent items or prices.
-- Keep responses helpful, natural, friendly, and human-like.
+- Keep responses natural and helpful.
 """
-
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-
     if not gemini_client:
         raise HTTPException(503, "AI unavailable")
 
@@ -172,7 +163,6 @@ async def chat_endpoint(request: ChatRequest):
 
     except Exception as e:
         raise HTTPException(500, f"Gemini API Error: {e}")
-
 
 @app.get("/")
 def home():
