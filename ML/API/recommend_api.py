@@ -22,11 +22,12 @@ MODEL_PATH = (ML_DIR / "Model" / "trained_model.pkl").resolve()
 
 def load_orders() -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
-    df.columns = [c.strip().replace("\ufeff", "").lower() for c in df.columns]
+    df.columns = df.columns.str.strip().str.lower()
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         df = df.dropna(subset=["timestamp"])
     return df
+
 
 
 def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
