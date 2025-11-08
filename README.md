@@ -1,7 +1,7 @@
 ﻿# Canteen-Recommendation-System
 # ML Module — Canteen Recommendation System
 ## API (recommendation)
-https://canteen-recommendation-system.onrender.com/docs
+https://canteen-recommendation-system.onrender.com/recommend/docs
 ## API (chatbot)
 https://canteen-recommendation-system.onrender.com
 ## Endpoints
