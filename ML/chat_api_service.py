@@ -1,5 +1,4 @@
 import os
-import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -9,7 +8,7 @@ from google.genai import types
 from fastapi.middleware.cors import CORSMiddleware
 
 # ---------------------------------------------------------
-# ✅ 1. FastAPI App + CORS
+# ✅ 1. FastAPI + CORS
 # ---------------------------------------------------------
 app = FastAPI(
     title="Gemini Conversational API",
@@ -18,7 +17,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,7 +26,7 @@ app.add_middleware(
 load_dotenv()
 
 # ---------------------------------------------------------
-# ✅ 2. Canteen Menu (edit anytime)
+# ✅ 2. Canteen Menu
 # ---------------------------------------------------------
 CANTEEN_MENU = """
 Available items in our University Canteen:
@@ -45,29 +44,26 @@ Available items in our University Canteen:
 """
 
 SYSTEM_PROMPT = f"""
-You are the AI assistant for the College Canteen.
+You are the official AI assistant for the College Canteen.
 
-Your rules:
-1. Only use the following menu:
+RULES:
+1. You ONLY use the following menu:
 {CANTEEN_MENU}
 
-2. If the user asks for recommendations (like spicy items, healthy dishes, what to eat, best options, etc.)
-   respond ONLY with:
+2. If a user asks for recommendations:
+   Respond EXACTLY in JSON:
    {{"action": "recommend", "query": "<user message>"}}
 
-3. For questions about menu, prices, what is available:
-   - Answer briefly using only the menu.
+3. If the user asks about a food item NOT in the menu:
+   Respond: "Sorry, that item is not available in our canteen."
 
-4. If an item is not in the menu:
-   - Reply: "Sorry, that item is not available in our canteen."
+4. For price, ingredients, availability: answer using ONLY the menu.
 
-5. Do NOT invent new dishes.
-
-6. Keep responses friendly.
+5. Never invent dishes or extra details.
 """
 
 # ---------------------------------------------------------
-# ✅ Pydantic Models
+# ✅ 3. Pydantic Models
 # ---------------------------------------------------------
 class Part(BaseModel):
     text: str
@@ -84,52 +80,41 @@ class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
 
+
 # ---------------------------------------------------------
-# ✅ Initialize Gemini Client
+# ✅ 4. Initialize Gemini Client
 # ---------------------------------------------------------
 try:
     gemini_client = genai.Client()
     GEMINI_MODEL = "gemini-2.5-flash"
 except Exception as e:
-    print("Gemini initialization failed:", e)
     gemini_client = None
+    print("Gemini initialization failed:", e)
+
 
 # ---------------------------------------------------------
-# ✅ Helper: Call Recommendation API
-# ---------------------------------------------------------
-def call_recommendation_api(query: str):
-    RECOMMEND_URL = "http://127.0.0.1:8000/recommend/predict"   # LOCAL
-    # For Render:
-    # RECOMMEND_URL = "https://canteen-recommendation-system.onrender.com/recommend/predict"
-
-    try:
-        res = requests.post(RECOMMEND_URL, json={"query": query})
-        if res.status_code != 200:
-            return None
-        
-        return res.json()["recommendations"]
-    
-    except Exception as e:
-        print("Recommendation API error:", e)
-        return None
-
-# ---------------------------------------------------------
-# ✅ 5. Chat Endpoint (Main Logic)
+# ✅ 5. Chat Endpoint
 # ---------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
 
     if not gemini_client:
-        raise HTTPException(503, "AI service unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="AI service unavailable"
+        )
 
     conversation = []
 
-    # ✅ Add system prompt FIRST
+    # ✅ Inject system prompt AS A USER (Gemini requires valid role)
     conversation.append(
-        types.Content(role="system", parts=[types.Part(text=SYSTEM_PROMPT)])
+        types.Content(
+            role="user",
+            parts=[types.Part(text=SYSTEM_PROMPT)]
+        )
     )
 
-    # ✅ Add chat history
+    # ✅ Convert chat history
     for msg in request.history:
         conversation.append(
             types.Content(
@@ -140,54 +125,40 @@ async def chat_endpoint(request: ChatRequest):
 
     # ✅ Add new user message
     conversation.append(
-        types.Content(role="user", parts=[types.Part(text=request.new_message)])
+        types.Content(
+            role="user",
+            parts=[types.Part(text=request.new_message)]
+        )
     )
 
     try:
-        # ✅ Call Gemini
+        # ✅ Generate reply from Gemini
         ai_response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=conversation
         )
 
-        reply_text = ai_response.text.strip()
+        reply_text = ai_response.text
 
-        # ✅ Detect recommendation trigger
-        if reply_text.startswith("{") and reply_text.endswith("}") and '"action": "recommend"' in reply_text:
-            import json
-            parsed = json.loads(reply_text)
-            user_query = parsed["query"]
-
-            # ✅ Call your recommendation ML API
-            recos = call_recommendation_api(user_query)
-
-            if recos:
-                pretty = "\n".join([f"• {item}" for item in recos])
-                final_reply = f"Here are some recommendations based on what you said:\n{pretty}"
-            else:
-                final_reply = "Sorry, I couldn't fetch recommendations right now."
-
-        else:
-            # ✅ Normal answer
-            final_reply = reply_text
-
-        # ✅ Build new history
         updated_history = request.history + [
             Content(role="user", parts=[Part(text=request.new_message)]),
-            Content(role="model", parts=[Part(text=final_reply)])
+            Content(role="model", parts=[Part(text=reply_text)])
         ]
 
         return ChatResponse(
-            reply=final_reply,
+            reply=reply_text,
             updated_history=updated_history
         )
 
     except Exception as e:
-        raise HTTPException(500, f"Gemini API error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini API error: {e}"
+        )
 
 # ---------------------------------------------------------
-# ✅ 6. Test endpoint
+# ✅ 6. Test Endpoint
 # ---------------------------------------------------------
 @app.get("/")
 def home():
-    return {"message": "Canteen Chatbot API with Recommendations ✅", "docs": "/chat/docs"}
+    return {"message": "Canteen Chatbot API running ✅", "docs": "/chat/docs"}
