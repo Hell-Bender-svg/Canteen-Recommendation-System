@@ -25,6 +25,7 @@ def load_orders() -> pd.DataFrame:
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         df = df.dropna(subset=["timestamp"])
+    df = df.rename(columns={"Food_Item": "item_name"})
     return df
 
 def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
