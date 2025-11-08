@@ -1,6 +1,6 @@
 import os
-import random
 import pandas as pd
+import random
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,34 +24,43 @@ app.add_middleware(
 
 MENU_PATH = "ML/Data/raw/menu.csv"
 
-def lazy_menu():
-    df = pd.read_csv(MENU_PATH)
+def load_menu():
+    df = pd.read_csv(MENU_PATH, encoding="utf-8-sig")
+    df.columns = [c.strip().lower() for c in df.columns]
+    if "item_name" not in df.columns:
+        raise ValueError("menu.csv must contain an 'item_name' column")
+    if "price" not in df.columns:
+        raise ValueError("menu.csv must contain a 'price' column")
+    if "available" not in df.columns:
+        df["available"] = True
     df["available"] = df["available"].astype(str).str.lower().isin(["yes", "true", "1"])
     return df
 
 def menu_text():
-    df = lazy_menu()
+    df = load_menu()
     return "\n".join([f"- {row['item_name']} — ₹{row['price']}" for _, row in df.iterrows()])
 
 def stock_status():
-    df = lazy_menu()
-    return {row["item_name"]: row["available"] for _, row in df.iterrows()}
+    df = load_menu()
+    return {row["item_name"]: bool(row["available"]) for _, row in df.iterrows()}
 
 def specials():
-    df = lazy_menu()
-    return df.sample(min(2, len(df)))["item_name"].tolist()
+    df = load_menu()
+    if len(df) < 2:
+        return df["item_name"].tolist()
+    return random.sample(df["item_name"].tolist(), 2)
 
 def popularity_rank():
     orders = load_orders()
     pop = get_popular(orders, top_n=10)
     return {entry["item_name"]: i + 1 for i, entry in enumerate(pop)}
 
-def mood_detect(text):
+def detect_mood(text):
     t = text.lower()
-    if any(k in t for k in ["tired", "sleepy"]): return "tired"
-    if any(k in t for k in ["sad", "upset"]): return "sad"
-    if any(k in t for k in ["angry", "irritated"]): return "angry"
-    if any(k in t for k in ["hungry", "starving"]): return "hungry"
+    if any(x in t for x in ["tired", "sleepy"]): return "tired"
+    if any(x in t for x in ["sad", "upset", "down"]): return "sad"
+    if any(x in t for x in ["angry", "irritated"]): return "angry"
+    if any(x in t for x in ["hungry", "starving"]): return "hungry"
     return None
 
 class Part(BaseModel):
@@ -75,20 +84,20 @@ try:
 except:
     gemini_client = None
 
-def system_prompt(user_message):
-    m = mood_detect(user_message)
+def system_prompt(message):
+    m = detect_mood(message)
     menu = menu_text()
     stock = stock_status()
     pop = popularity_rank()
     sp = specials()
-    mh = {
+    mood_hint = {
         "tired": "User is tired. Suggest energy boosters like Cold Coffee.",
-        "hungry": "User is hungry. Suggest Veg Thali or Paneer Thali.",
+        "hungry": "User is hungry. Suggest filling meals like Veg Thali or Paneer Thali.",
         "sad": "User is sad. Suggest comfort foods like Maggi or Samosa.",
         "angry": "User is irritated. Suggest quick items like Samosa."
     }.get(m, "")
     return f"""
-You are the canteen assistant.
+You are the intelligent and friendly canteen assistant.
 
 MENU:
 {menu}
@@ -96,22 +105,24 @@ MENU:
 STOCK:
 {stock}
 
-POPULAR:
+POPULARITY:
 {pop}
 
-SPECIALS:
+TODAY_SPECIALS:
 {sp}
 
-MOOD:
-{mh}
+MOOD_HINT:
+{mood_hint}
 
 RULES:
-- For greetings respond friendly.
-- For availability check stock strictly.
-- For unavailable items say they are not available.
-- For recommendations respond exactly in JSON:
+- Respond naturally to greetings.
+- Check STOCK strictly before confirming availability.
+- If an item is unavailable, say it is not available today.
+- If a user asks for recommendations, reply exactly in JSON:
   {{"action":"recommend","query":"<user message>"}}
-- Never invent items.
+- Only use menu items and prices from MENU.
+- If user asks for a non-menu item, say it is not available.
+- Keep responses concise, friendly, and helpful.
 """
 
 @app.post("/chat", response_model=ChatResponse)
@@ -119,8 +130,9 @@ async def chat(request: ChatRequest):
     if not gemini_client:
         raise HTTPException(503, "AI unavailable")
 
-    sp = system_prompt(request.new_message)
-    convo = [types.Content(role="user", parts=[types.Part(text=sp)])]
+    prompt = system_prompt(request.new_message)
+
+    convo = [types.Content(role="user", parts=[types.Part(text=prompt)])]
 
     for msg in request.history:
         convo.append(
@@ -130,18 +142,16 @@ async def chat(request: ChatRequest):
             )
         )
 
-    convo.append(
-        types.Content(role="user", parts=[types.Part(text=request.new_message)])
-    )
+    convo.append(types.Content(role="user", parts=[types.Part(text=request.new_message)]))
 
     try:
         res = gemini_client.models.generate_content(model=MODEL, contents=convo)
         reply = res.text
-        updated = request.history + [
+        updated_history = request.history + [
             Content(role="user", parts=[Part(text=request.new_message)]),
             Content(role="model", parts=[Part(text=reply)])
         ]
-        return ChatResponse(reply=reply, updated_history=updated)
+        return ChatResponse(reply=reply, updated_history=updated_history)
     except Exception as e:
         raise HTTPException(500, str(e))
 

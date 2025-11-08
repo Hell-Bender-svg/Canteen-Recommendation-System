@@ -21,29 +21,26 @@ DATA_PATH = (ML_DIR / "Data" / "raw" / "mock_canteen_orders.csv").resolve()
 MODEL_PATH = (ML_DIR / "Model" / "trained_model.pkl").resolve()
 
 def load_orders() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_csv(DATA_PATH, encoding="utf-8-sig")
     df.columns = df.columns.str.strip().str.lower()
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         df = df.dropna(subset=["timestamp"])
     return df
 
-
-
 def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
-    df.columns = [c.strip().replace("\ufeff", "").lower() for c in df.columns]
-
+    df.columns = df.columns.str.strip().str.lower()
+    if "item_name" not in df.columns:
+        raise KeyError(f"item_name column missing. Columns found: {df.columns.tolist()}")
     if days and "timestamp" in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
             if df["timestamp"].dt.tz is not None:
                 df["timestamp"] = df["timestamp"].dt.tz_localize(None)
             cutoff = pd.Timestamp.utcnow().tz_localize(None) - timedelta(days=days)
             df = df[df["timestamp"] >= cutoff]
-
     counts = df["item_name"].value_counts().reset_index()
     counts.columns = ["item_name", "order_count"]
     return counts.head(top_n).to_dict(orient="records")
-
 
 def try_personalized(user_id: str, top_n: int = 5):
     try:
@@ -66,37 +63,16 @@ def health():
     return {"ok": True, "service": "canteen-recommendation-api"}
 
 @app.get("/recommend")
-def recommend(
-    top_n: int = Query(5, ge=1, le=50),
-    window_days: Optional[int] = Query(None, ge=1),
-):
+def recommend(top_n: int = Query(5, ge=1, le=50), window_days: Optional[int] = Query(None, ge=1)):
     df = load_orders()
     recs = get_popular(df, top_n=top_n, days=window_days)
-    return {
-        "mode": "popular",
-        "top_n": top_n,
-        "window_days": window_days,
-        "recommendations": recs,
-    }
+    return {"mode": "popular", "top_n": top_n, "window_days": window_days, "recommendations": recs}
 
 @app.get("/recommend/user/{user_id}")
-def recommend_user(
-    user_id: str,
-    top_n: int = Query(5, ge=1, le=50),
-):
+def recommend_user(user_id: str, top_n: int = Query(5, ge=1, le=50)):
     recs = try_personalized(user_id, top_n=top_n)
     if recs:
-        return {
-            "mode": "personalized",
-            "user_id": user_id,
-            "top_n": top_n,
-            "recommendations": recs,
-        }
+        return {"mode": "personalized", "user_id": user_id, "top_n": top_n, "recommendations": recs}
     df = load_orders()
     fallback = get_popular(df, top_n=top_n)
-    return {
-        "mode": "popular-fallback",
-        "user_id": user_id,
-        "top_n": top_n,
-        "recommendations": fallback,
-    }
+    return {"mode": "popular-fallback", "user_id": user_id, "top_n": top_n, "recommendations": fallback}
