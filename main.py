@@ -1,19 +1,12 @@
 from fastapi import FastAPI
-from ML.API.recommend_api import app as recommend_app
+from ML.API import recommend_api
 from ML.chat_api_service import app as chat_app
 
-app = FastAPI(title="Canteen ML + Chat API")
-
-app.mount("/recommend", recommend_app)
-app.mount("/chat", chat_app)
+app = FastAPI()
 
 @app.get("/")
-def root():
-    return {
-        "message": "Canteen ML + Chat API is running!",
-        "endpoints": [
-            "/recommend",
-            "/chat",
-            "/docs"
-        ]
-    }
+def home():
+    return {"message": "Unified API running"}
+
+app.mount("/recommend", recommend_api.app)
+app.mount("/chat", chat_app)
