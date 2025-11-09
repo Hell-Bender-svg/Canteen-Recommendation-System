@@ -1,6 +1,5 @@
 import os
 import random
-import json
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -40,79 +39,78 @@ try:
 except:
     ai = None
 
-def get_tools_data():
+def get_canteen_data():
     try:
         menu = get_menu()
-        popular = get_popular(5)
-        highest_rated = get_highest_rated(5)
-        spicy = spicy_items()[:5] if spicy_items() else []
+        popular = get_popular(10)
+        highest_rated = get_highest_rated(10)
+        spicy = spicy_items()
         
         return {
             "menu": menu,
             "popular": popular,
             "highest_rated": highest_rated,
-            "spicy": spicy
+            "spicy": spicy[:10] if spicy else []
         }
     except:
         return None
 
 def create_system_instruction():
-    data = get_tools_data()
+    data = get_canteen_data()
     if not data:
-        return "You are a college canteen assistant. Help users with their queries."
+        return "You are a college canteen assistant. Help users with their queries about food and menu items."
     
-    menu_text = "\n".join([
-        f"- {i['item_name']} (₹{i['price']}) - {i.get('category', 'N/A')}" 
-        for i in data['menu']
-    ])
+    menu_items = []
+    for item in data['menu']:
+        menu_items.append(f"- {item['item_name']} (₹{item['price']}) [{item.get('category', 'General')}]")
     
-    popular_text = "\n".join([
-        f"{idx+1}. {i['item_name']}" 
-        for idx, i in enumerate(data['popular'])
-    ])
+    popular_items = []
+    for idx, item in enumerate(data['popular'], 1):
+        score = item.get('popularity_score', 0)
+        popular_items.append(f"{idx}. {item['item_name']} (Popularity: {score})")
     
-    rated_text = "\n".join([
-        f"{idx+1}. {i['item_name']}" 
-        for idx, i in enumerate(data['highest_rated'])
-    ])
+    rated_items = []
+    for idx, item in enumerate(data['highest_rated'], 1):
+        rating = item.get('rating', 0)
+        rated_items.append(f"{idx}. {item['item_name']} (Rating: {rating:.1f}/5)")
     
-    spicy_text = "\n".join([
-        f"{idx+1}. {i['item_name']}" 
-        for idx, i in enumerate(data['spicy'])
-    ]) if data['spicy'] else "No spicy items available"
+    spicy_items_list = []
+    for idx, item in enumerate(data['spicy'], 1):
+        level = item.get('spicy_level', 0)
+        spicy_items_list.append(f"{idx}. {item['item_name']} (Spice Level: {level})")
     
-    return f"""You are the official college canteen chatbot assistant. Your job is to help students and staff with food recommendations, menu inquiries, and general canteen questions.
+    return f"""You are the friendly college canteen chatbot assistant. Help students find food they'll love!
 
 COMPLETE MENU:
-{menu_text}
+{chr(10).join(menu_items)}
 
-TOP 5 POPULAR ITEMS:
-{popular_text}
+TOP 10 MOST POPULAR ITEMS:
+{chr(10).join(popular_items)}
 
-TOP 5 HIGHEST RATED ITEMS:
-{rated_text}
+TOP 10 HIGHEST RATED ITEMS:
+{chr(10).join(rated_items)}
 
-SPICY ITEMS:
-{spicy_text}
+SPICY ITEMS (Spice Level 3+):
+{chr(10).join(spicy_items_list) if spicy_items_list else "No spicy items available"}
 
-INSTRUCTIONS:
-1. Be friendly, casual, and helpful
-2. Only recommend items from the menu above
-3. When asked about prices, always use the exact prices shown
-4. If asked about items not on the menu, politely say they are unavailable
-5. When recommending food, consider the context (breakfast, lunch, dinner, snacks)
-6. You can suggest combinations or meal ideas using available items
-7. Be concise but informative
-8. Use emojis occasionally to be friendly
-9. If asked about categories, filter items by their category
-10. When suggesting popular or highly rated items, use the data provided above
+YOUR ROLE:
+1. Be friendly, casual, and helpful - like talking to a friend
+2. ONLY recommend items from the menu above - never invent items
+3. When asked about prices, use exact prices from the menu
+4. When asked for popular items, use the popularity list above
+5. When asked for highest rated items, use the ratings list above
+6. If someone asks about an item not on the menu, politely say it's unavailable
+7. Consider meal times - suggest breakfast items in morning, lunch items midday, snacks in evening
+8. You can suggest combos using available items
+9. Be concise but friendly
+10. Use emojis occasionally to be engaging
 
-Remember: Never invent items, prices, or information not provided in the menu."""
+NEVER make up item names, prices, or ratings. Always use the data provided above."""
 
 def quick_response(msg: str):
     t = msg.lower().strip()
     
-    if any(g in t for g in ["hi", "hello", "hey", "hii"]) and len(t) < 20:
+    if len(t) < 20 and any(g in t for g in ["hi", "hello", "hey", "hii", "helo"]):
         return random.choice([
             "Hey! What's cooking today? 😄",
             "Hello! Ready to grab something yummy? 😋",
@@ -120,14 +118,14 @@ def quick_response(msg: str):
             "Hey! Looking for something delicious? 🌟"
         ])
     
-    if any(g in t for g in ["bye", "goodbye", "see you"]) and len(t) < 25:
+    if len(t) < 25 and any(g in t for g in ["bye", "goodbye", "see you", "later"]):
         return random.choice([
             "Goodbye! Enjoy your meal! 😊",
             "See you later! Come back soon! 👋",
             "Bye! Hope you find something tasty! 🍴"
         ])
     
-    if any(g in t for g in ["thanks", "thank you", "thx"]) and len(t) < 25:
+    if len(t) < 25 and any(g in t for g in ["thanks", "thank you", "thx", "thanku"]):
         return random.choice([
             "You're welcome! 😊",
             "Happy to help! 🌟",

@@ -88,13 +88,15 @@ def spicy_items():
     if "spicy_level" not in df.columns:
         return []
     
-    spicy_df = df[df["spicy_level"] >= 3]
+    df["spicy_level_numeric"] = pd.to_numeric(df["spicy_level"], errors="coerce")
+    spicy_df = df[df["spicy_level_numeric"] >= 3].copy()
     
     if spicy_df.empty:
         return []
     
     if "item_name" in spicy_df.columns:
-        result_df = spicy_df.groupby("item_name", as_index=False)["spicy_level"].mean()
+        result_df = spicy_df.groupby("item_name", as_index=False)["spicy_level_numeric"].mean()
+        result_df = result_df.rename(columns={"spicy_level_numeric": "spicy_level"})
         result_df = result_df.sort_values("spicy_level", ascending=False)
         return result_df.to_dict(orient="records")
     
