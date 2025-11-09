@@ -1,59 +1,47 @@
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, Query
 from pathlib import Path
-from typing import Optional
 import pandas as pd
-from datetime import timedelta
 
-app = FastAPI()
+router = APIRouter()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_PATH = (BASE_DIR / "Data" / "raw" / "canteen_recommendation_dataset.csv").resolve()
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = (BASE_DIR.parent.parent / "Data" / "raw" / "canteen_recommendation_dataset.csv").resolve()
-
-def load_orders() -> pd.DataFrame:
+def load_orders():
     df = pd.read_csv(DATA_PATH)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    df = df.dropna(subset=["timestamp"])
+    df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
     return df
 
-def get_popular(df: pd.DataFrame, top_n: int = 5):
+def get_popular(df, top_n=5):
     counts = df["item_name"].value_counts().reset_index()
     counts.columns = ["item_name", "order_count"]
     return counts.head(top_n).to_dict(orient="records")
 
-def get_highest_rated(df: pd.DataFrame, top_n: int = 5):
-    ranked = df.groupby("item_name")["rating"].mean().sort_values(ascending=False)
-    return [{"item_name": i, "avg_rating": float(r)} for i, r in ranked.head(top_n).items()]
+def get_highest_rated(df, top_n=5):
+    g = df.groupby("item_name")["rating"].mean().reset_index()
+    g = g.sort_values("rating", ascending=False)
+    return g.head(top_n).to_dict(orient="records")
 
-def find_by_category(df: pd.DataFrame, category: str):
+def find_by_category(df, category):
     x = df[df["category"].str.lower() == category.lower()]
     if x.empty:
         return []
     return x["item_name"].unique().tolist()
 
-@app.get("/")
-def api_home():
-    return {"ok": True}
-
-@app.get("/popular")
-def popular(top_n: int = 5):
+@router.get("/recommend/popular")
+def recommend_popular(top_n: int = Query(5, ge=1, le=50)):
     df = load_orders()
-    return get_popular(df, top_n)
+    recs = get_popular(df, top_n)
+    return {"mode": "popular", "items": recs}
 
-@app.get("/highest_rated")
-def highest_rated(top_n: int = 5):
+@router.get("/recommend/top-rated")
+def recommend_top_rated(top_n: int = Query(5, ge=1, le=50)):
     df = load_orders()
-    return get_highest_rated(df, top_n)
+    recs = get_highest_rated(df, top_n)
+    return {"mode": "top-rated", "items": recs}
 
-@app.get("/category")
-def category(c: str):
+@router.get("/recommend/category/{category}")
+def recommend_by_category(category: str):
     df = load_orders()
-    return find_by_category(df, c)
+    items = find_by_category(df, category)
+    return {"mode": "category", "category": category, "items": items}

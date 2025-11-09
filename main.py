@@ -1,12 +1,12 @@
 from fastapi import FastAPI
-from ML.API import recommend_api
-from ML.chat_api_service import app as chat_app
+from ML.API.recommend_api import router as recommend_router
+from ML.chat_api_service import router as chat_router
 
 app = FastAPI()
 
-@app.get("/")
-def home():
-    return {"message": "Unified API running"}
+app.include_router(recommend_router, prefix="/api")
+app.include_router(chat_router, prefix="/chat")
 
-app.mount("/recommend", recommend_api.app)
-app.mount("/chat", chat_app)
+@app.get("/")
+def root():
+    return {"msg": "Backend Working"}
