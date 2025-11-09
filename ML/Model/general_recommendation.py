@@ -6,6 +6,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 import pickle
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(BASE_DIR, "../../ML/Data/raw/canteen_recommendation_dataset.csv")
+
 class ContentBasedRecommender:
     def __init__(self, data_path="data/canteen_recommendation_dataset.csv"):
        

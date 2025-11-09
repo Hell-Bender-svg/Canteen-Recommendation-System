@@ -18,7 +18,7 @@ app = FastAPI(title="Canteen General Recommendation API")
 
 # Path to dataset and model
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR, "../../Data/raw/canteen_recommendation_dataset.csv")
+DATA_PATH = os.path.join(BASE_DIR, "../../Ml/Data/raw/canteen_recommendation_dataset.csv")
 
 df_raw = pd.read_csv(DATA_PATH)
 MODEL_PATH = os.path.abspath("../ML/Model/item_similarity.pkl")
