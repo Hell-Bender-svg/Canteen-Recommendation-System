@@ -14,11 +14,11 @@ class PersonalizedRecommender:
         self.similarity_df = None
 
     async def fetch_data(self):
-        """Fetch purchase data asynchronously from MongoDB."""
+        
         cursor = self.collection.find({})
         records = []
 
-        async for doc in cursor:  # ✅ async loop for Motor
+        async for doc in cursor:  
             user_id = str(doc.get("userId"))
             for item in doc.get("items", []):
                 item_id = str(item.get("itemId", "unknown"))
@@ -63,7 +63,7 @@ class PersonalizedRecommender:
         return self.similarity_df
 
     def save_model(self, path="ML/Model/personalized_model.pkl"):
-        """Save the similarity model."""
+        
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             pickle.dump(self.similarity_df, f)
@@ -78,18 +78,18 @@ class PersonalizedRecommender:
         print(f"✅ Personalized model loaded from: {path}")
 
     def recommend_for_user(self, user_id, n=5):
-        """Recommend items for a user based on similar users."""
+        
         if self.similarity_df is None:
             raise ValueError("Model not trained or loaded.")
 
         if user_id not in self.similarity_df.index:
             raise ValueError(f"User {user_id} not found in similarity matrix.")
 
-        # Find top similar users
+        
         similar_users = self.similarity_df[user_id].sort_values(ascending=False)[1:n+1]
         top_users = similar_users.index.tolist()
 
-        # Find items purchased by similar users but not by target user
+        
         user_purchases = self.user_item_matrix.loc[user_id]
         already_bought = set(user_purchases[user_purchases > 0].index)
 
