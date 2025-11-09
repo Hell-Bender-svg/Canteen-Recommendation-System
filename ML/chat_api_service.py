@@ -1,8 +1,7 @@
-from typing import List, Dict, Any
+import random
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-import re
-
+from typing import List
 from ML.API.recommend_api import (
     get_menu,
     get_popular,
@@ -27,108 +26,109 @@ class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
 
-def _lower(s: str):
-    return re.sub(r"\s+", " ", s.strip().lower())
 
-def _safe(fn, *args, **kwargs):
-    try:
-        return fn(*args, **kwargs)
-    except:
-        return None
+def text_menu():
+    items = get_menu()
+    return "\n".join([f"- {i['item_name']} (₹{i['price']}) [{i['category']}]" for i in items])
 
-def _menu_list() -> List[Dict[str, Any]]:
-    m = _safe(get_menu) or []
+
+def text_popular():
+    items = get_popular(10)
+    return "\n".join([f"{idx+1}. {i['item_name']} — score {i['score']}" for idx, i in enumerate(items)])
+
+
+def text_rated():
+    items = get_highest_rated(10)
+    return "\n".join([f"{idx+1}. {i['item_name']} — rating {round(i['rating'], 2)}" for idx, i in enumerate(items)])
+
+
+def spicy_items():
+    menu = get_menu()
+    spicy_words = ["spicy", "masala", "hot", "peri peri", "tandoori"]
     out = []
-    for row in m:
-        if row.get("item_name") and isinstance(row.get("price"), (int, float)):
-            out.append({
-                "item_name": row["item_name"],
-                "price": float(row["price"]),
-                "category": row.get("category")
-            })
-    return out
-
-def _fmt(rows: List[Dict[str, Any]]):
-    if not rows:
-        return "No items found."
-    lines = []
-    for i, r in enumerate(rows):
-        base = f"{i+1}. {r['item_name']} — ₹{int(r['price']) if float(r['price']).is_integer() else r['price']}"
-        if r.get("category"):
-            base += f" ({r['category']})"
-        lines.append(base)
-    return "\n".join(lines)
-
-def _spicy_filter(menu: List[Dict[str, Any]]):
-    spicy_words = ["spicy", "masala", "chilli", "hot", "tandoori"]
-    out = []
-    for r in menu:
-        name = _lower(r["item_name"])
+    for m in menu:
+        name = m["item_name"].lower()
         if any(w in name for w in spicy_words):
-            out.append(r)
+            out.append(m)
     return out
 
-def _budget(text: str):
-    m = re.search(r"(?:under|below|upto|up to|<=)\s*₹?\s*(\d+)", text)
-    if m:
-        return float(m.group(1))
-    return None
 
-def _category(text: str):
-    m = re.search(r"category\s+([a-zA-Z ]+)", text)
-    if m:
-        return m.group(1).strip().title()
-    return None
+def text_spicy():
+    items = spicy_items()
+    if not items:
+        return "No spicy items found."
+    return "\n".join([f"- {i['item_name']} (₹{i['price']})" for i in items])
 
-def _reply(text: str) -> str:
-    t = _lower(text)
-    menu = _menu_list()
 
-    greetings = ["hi", "hello", "hey", "hola", "namaste"]
-    if any(t == g or t.startswith(g + " ") for g in greetings):
-        return "Hey! What can I get you today? 🙂"
+def rule_engine(user_text: str):
+    t = user_text.lower()
+
+    greetings = ["hi", "hello", "hey", "hii", "yo"]
+    if t in greetings or any(t.startswith(g) for g in greetings):
+        return random.choice([
+            "Hey! What’s cooking? 😊",
+            "Hello! Craving something tasty? 😄",
+            "Hi there! What would you like today? 🍽️",
+        ])
 
     if "menu" in t:
-        return "Here is the menu:\n" + _fmt(menu)
+        return f"Here is the menu:\n{text_menu()}"
 
     if "popular" in t or "trending" in t:
-        p = _safe(get_popular, 10) or []
-        return "Popular items:\n" + _fmt(p)
+        return f"Top popular dishes:\n{text_popular()}"
 
-    if "highest rated" in t or "top rated" in t or "best rated" in t:
-        r = _safe(get_highest_rated, 10) or []
-        return "Highest-rated dishes:\n" + _fmt(r)
+    if "highest rated" in t or "high rating" in t or "best rated" in t:
+        return f"Here are the highest rated dishes:\n{text_rated()}"
 
-    if "spicy" in t or "something hot" in t:
-        spicy = _spicy_filter(menu)
-        return "Spicy dishes:\n" + _fmt(spicy)
+    if "spicy" in t or "hot" in t:
+        return f"Here are some spicy options:\n{text_spicy()}"
 
-    b = _budget(t)
-    if b:
-        affordable = [r for r in menu if r["price"] <= b]
-        return f"Items under ₹{int(b)}:\n" + _fmt(affordable)
+    if "suggest" in t and "category" in t:
+        cat = t.split("category")[-1].strip(" :,.")
+        items = find_by_category(cat, 10)
+        if not items:
+            return f"No items found in category '{cat}'."
+        lines = [f"{idx+1}. {i['item_name']} — score {i['score']}" for idx, i in enumerate(items)]
+        return f"Here are some suggestions in {cat}:\n" + "\n".join(lines)
 
-    cat = _category(t)
-    if cat:
-        items = _safe(find_by_category, cat, 20) or []
-        return f"Items in category '{cat}':\n" + _fmt(items)
+    if "breakfast" in t:
+        return "Breakfast suggestions:\n" + "\n".join(
+            [i['item_name'] for i in find_by_category("Breakfast", 10)]
+        )
 
-    exact = [r for r in menu if _lower(r["item_name"]) == t]
-    if exact:
-        r = exact[0]
-        return f"{r['item_name']} costs ₹{int(r['price'])}."
+    if "lunch" in t:
+        return "Lunch suggestions:\n" + "\n".join(
+            [i['item_name'] for i in find_by_category("Lunch", 10)]
+        )
 
-    return "I can show the menu, popular items, highest-rated dishes, spicy foods, or category-wise suggestions. Try: 'show menu', 'popular items', 'spicy items', 'highest rated', or 'category snacks'."
+    if "snack" in t or "snacks" in t:
+        return "Snack ideas:\n" + "\n".join(
+            [i['item_name'] for i in find_by_category("Snacks", 10)]
+        )
+
+    return (
+        "I can help you with:\n"
+        "- menu\n"
+        "- popular items\n"
+        "- highest rated dishes\n"
+        "- spicy items\n"
+        "- category suggestions\n"
+        "Try: 'show menu', 'popular items', 'spicy food', or 'highest rated'"
+    )
+
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    reply = _reply(request.new_message)
+    reply = rule_engine(request.new_message)
+
     updated = request.history + [
         Content(role="user", parts=[Part(text=request.new_message)]),
-        Content(role="model", parts=[Part(text=reply)])
+        Content(role="model", parts=[Part(text=reply)]),
     ]
+
     return ChatResponse(reply=reply, updated_history=updated)
 
+
 @router.get("/")
-def ping():
-    return {"ok": True}
+def test():
+    return {"ok": True, "msg": "Chatbot active"}
