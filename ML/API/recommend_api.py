@@ -1,90 +1,60 @@
-from fastapi import APIRouter, Query
 import pandas as pd
-from pathlib import Path
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATASET_PATH = BASE_DIR / "Data" / "raw" / "canteen_recommendation_dataset.csv"
-MENU_PATH = BASE_DIR / "Data" / "raw" / "menu.csv"
-
+DATA_PATH = "ML/Data/raw/canteen_recommendation_dataset.csv"
+MENU_PATH = "ML/Data/raw/menu.csv"
 
 def load_dataset():
-    return pd.read_csv(DATASET_PATH)
-
+    try:
+        return pd.read_csv(DATA_PATH)
+    except:
+        raise HTTPException(500, "canteen_recommendation_dataset.csv missing")
 
 def load_menu():
-    return pd.read_csv(MENU_PATH)
+    try:
+        return pd.read_csv(MENU_PATH)
+    except:
+        raise HTTPException(500, "menu.csv missing")
 
-
+@router.get("/menu")
 def get_menu():
     return load_menu().to_dict(orient="records")
 
-
-def get_item_price(item):
-    df = load_menu()
-    r = df[df["item_name"].str.lower() == item.lower()]
-    return None if r.empty else float(r.iloc[0]["price"])
-
-
-def search_item(item):
-    df = load_menu()
-    r = df[df["item_name"].str.lower().str.contains(item.lower())]
-    return r.to_dict(orient="records")
-
-
-def find_by_category(category, limit=10):
-    df = load_menu()
-    r = df[df["category"].str.lower() == category.lower()]
-    return r.head(limit).to_dict(orient="records")
-
-
-def get_popular(limit=10):
-    df = load_dataset()
-    agg = df.groupby("item_name")["purchase_count"].sum().reset_index()
-    agg = agg.sort_values("purchase_count", ascending=False).head(limit)
-    out = agg.to_dict(orient="records")
-    for o in out:
-        o["score"] = int(o["purchase_count"])
-    return out
-
-
-def get_highest_rated(limit=10):
-    df = load_dataset()
-    agg = df.groupby("item_name")["rating"].mean().reset_index()
-    agg = agg.sort_values("rating", ascending=False).head(limit)
-    out = agg.to_dict(orient="records")
-    for o in out:
-        o["score"] = float(o["rating"])
-    return out
-
-
-@router.get("/menu")
-def menu():
-    return {"items": get_menu()}
-
-
-@router.get("/price")
-def price(item: str):
-    p = get_item_price(item)
-    return {"item": item, "price": p}
-
-
-@router.get("/search")
-def search(q: str):
-    return {"results": search_item(q)}
-
-
-@router.get("/category")
-def category(cat: str, limit: int = 10):
-    return {"category": cat, "items": find_by_category(cat, limit)}
-
-
 @router.get("/popular")
-def popular(limit: int = 10):
-    return {"popular": get_popular(limit)}
+def get_popular(top_n: int = 10):
+    df = load_dataset()
+    if "popularity_score" not in df.columns:
+        raise HTTPException(500, "popularity_score missing")
+    df = df.groupby("item_name")["popularity_score"].mean().sort_values(ascending=False)
+    df = df.reset_index().head(top_n)
+    return df.to_dict(orient="records")
 
+@router.get("/highest-rated")
+def get_highest_rated(top_n: int = 10):
+    df = load_dataset()
+    if "rating" not in df.columns:
+        raise HTTPException(500, "rating missing")
+    df = df.groupby("item_name")["rating"].mean().sort_values(ascending=False)
+    df = df.reset_index().head(top_n)
+    return df.to_dict(orient="records")
 
-@router.get("/highest_rated")
-def highest_rated(limit: int = 10):
-    return {"highest_rated": get_highest_rated(limit)}
+@router.get("/category/{cat}")
+def find_by_category(cat: str, top_n: int = 10):
+    df = load_dataset()
+    df = df[df["category"].str.lower() == cat.lower()]
+    if df.empty:
+        return []
+    df = df.groupby("item_name")["popularity_score"].mean().reset_index()
+    df = df.sort_values("popularity_score", ascending=False).head(top_n)
+    return df.to_dict(orient="records")
+
+@router.get("/spicy")
+def spicy_items():
+    df = load_dataset()
+    df = df[df["spicy_level"] >= 3]
+    if df.empty:
+        return []
+    df = df.groupby("item_name")["spicy_level"].mean().sort_values(ascending=False)
+    return df.reset_index().to_dict(orient="records")
