@@ -1,42 +1,21 @@
+import os
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from google import genai
-from google.genai import types
 from pydantic import BaseModel, Field
 from typing import List
-from ML.API.recommend_api import load_orders, get_popular, get_highest_rated, find_by_category
+from dotenv import load_dotenv
 
-router = APIRouter()
+from ML.API.recommend_api import (
+    load_orders,
+    get_menu,
+    get_popular,
+    get_highest_rated,
+    find_by_category,
+)
 
-MENU_PATH = "ML/Data/raw/menu.csv"
+load_dotenv()
 
-def load_menu():
-    return pd.read_csv(MENU_PATH)
-
-def menu_text():
-    df = load_menu()
-    return "\n".join([f"- {row['item_name']} — ₹{row['price']}" for _, row in df.iterrows()])
-
-def stock_status():
-    df = load_menu()
-    return {row["item_name"]: True for _, row in df.iterrows()}
-
-def specials():
-    df = load_menu()
-    return df.sample(min(2, len(df)))["item_name"].tolist()
-
-def popularity_rank():
-    df = load_orders()
-    p = get_popular(df, top_n=10)
-    return {v["item_name"]: i + 1 for i, v in enumerate(p)}
-
-def mood_detect(text):
-    t = text.lower()
-    if "tired" in t or "sleepy" in t: return "tired"
-    if "sad" in t or "upset" in t: return "sad"
-    if "angry" in t or "irritated" in t: return "angry"
-    if "hungry" in t or "starving" in t: return "hungry"
-    return None
+router = APIRouter(prefix="/chat", tags=["chat"])
 
 class Part(BaseModel):
     text: str
@@ -53,71 +32,69 @@ class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
 
-try:
-    gemini_client = genai.Client()
-    MODEL = "gemini-2.5-flash"
-except:
-    gemini_client = None
-
-def system_prompt(msg):
-    m = mood_detect(msg)
-    moods = {
-        "tired": "User is tired. Suggest Cold Coffee or energizing items.",
-        "hungry": "User is hungry. Suggest heavy meals like Thali.",
-        "sad": "User is sad. Suggest comfort foods like Maggi.",
-        "angry": "User is irritated. Suggest quick food like samosa."
-    }
-    mood_line = moods.get(m, "")
-    return f"""
-You are the canteen assistant.
-
-MENU:
-{menu_text()}
-
-STOCK:
-{stock_status()}
-
-POPULARITY:
-{popularity_rank()}
-
-SPECIALS:
-{specials()}
-
-MOOD:
-{mood_line}
-
-RULES:
-- Respond friendly for greetings.
-- If user requests recommendation return JSON:
-  {{"action":"recommend","query":"{msg}"}}
-- If user wants high rating dishes mention items from top-rated list.
-- Never invent items.
-"""
-
-@router.post("/chat")
-async def chat(req: ChatRequest):
-    if not gemini_client:
-        raise HTTPException(503, "AI offline")
-
-    prompt = system_prompt(req.new_message)
-    convo = [types.Content(role="user", parts=[types.Part(text=prompt)])]
-
-    for x in req.history:
-        convo.append(types.Content(role=x.role, parts=[types.Part(text=p.text) for p in x.parts]))
-
-    convo.append(types.Content(role="user", parts=[types.Part(text=req.new_message)]))
-
+def _safe(fn, *args, **kwargs):
     try:
-        r = gemini_client.models.generate_content(model=MODEL, contents=convo)
-        reply = r.text
-        new_hist = req.history + [
-            Content(role="user", parts=[Part(text=req.new_message)]),
-            Content(role="model", parts=[Part(text=reply)])
-        ]
-        return ChatResponse(reply=reply, updated_history=new_hist)
-    except Exception as e:
-        raise HTTPException(500, str(e))
+        return fn(*args, **kwargs)
+    except Exception:
+        return None
+
+def _menu_text() -> str:
+    m = _safe(get_menu) or []
+    if not m:
+        return "Menu unavailable."
+    lines = [f"- {row.get('item_name')} — ₹{row.get('price')} ({row.get('category')})" for row in m]
+    return "\n".join(lines)
+
+def _popular_text() -> str:
+    p = _safe(get_popular, 10) or []
+    if not p:
+        return "No popularity data."
+    lines = [f"{i+1}. {r.get('item_name')} — score {r.get('score')}" for i, r in enumerate(p)]
+    return "\n".join(lines)
+
+def _rated_text() -> str:
+    r = _safe(get_highest_rated, 10) or []
+    if not r:
+        return "No rating data."
+    lines = [f"{i+1}. {row.get('item_name')} — avg rating {round(float(row.get('rating', 0)),2) if 'rating' in row else row.get('score')}" for i, row in enumerate(r)]
+    return "\n".join(lines)
+
+def _category_text(cat: str) -> str:
+    items = _safe(find_by_category, cat, 10) or []
+    if not items:
+        return f"No items found for category '{cat}'."
+    lines = [f"{i+1}. {r.get('item_name')} — score {round(float(r.get('score', 0)),2) if isinstance(r.get('score'), (int,float)) else r.get('score')}" for i, r in enumerate(items)]
+    return "\n".join(lines)
+
+def _rule_based_reply(text: str) -> str:
+    t = text.lower()
+    if any(k in t for k in ["menu", "show menu", "list items"]):
+        return f"Here is the current menu:\n{_menu_text()}"
+    if "popular" in t or "trending" in t or "most ordered" in t:
+        return f"Top popular picks right now:\n{_popular_text()}"
+    if "highest rated" in t or "high rating" in t or "best rated" in t:
+        return f"Highest rated dishes:\n{_rated_text()}"
+    if "suggest" in t and "category" in t:
+        parts = t.split("category")
+        cat = parts[-1].strip(": ,.")
+        return f"Top items in category '{cat}':\n{_category_text(cat)}"
+    if "breakfast" in t:
+        return f"Breakfast ideas:\n{_category_text('Breakfast')}"
+    if "lunch" in t:
+        return f"Lunch ideas:\n{_category_text('Lunch')}"
+    if "snack" in t or "snacks" in t:
+        return f"Snack ideas:\n{_category_text('Snacks')}"
+    return "Hi! I can show the menu, popular items, highest-rated dishes, or suggestions by category. Try: 'show menu', 'popular items', 'highest rated', or 'suggest category Lunch'."
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    reply = _rule_based_reply(request.new_message)
+    updated = request.history + [
+        Content(role="user", parts=[Part(text=request.new_message)]),
+        Content(role="model", parts=[Part(text=reply)]),
+    ]
+    return ChatResponse(reply=reply, updated_history=updated)
 
 @router.get("/")
-def home():
-    return {"msg": "Chatbot Ready"}
+def ping():
+    return {"ok": True, "hint": "POST /chat/chat with {history, new_message}"}
