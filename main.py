@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ML.API.recommend_api import router as recommend_router
 from ML.chat_api_service import router as chat_router
 
-app = FastAPI(title="Canteen Recommendation System", version="1.0.0")
+app = FastAPI(title="Canteen Chatbot + Recommendation API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,19 +13,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(recommend_router)
-app.include_router(chat_router)
+app.include_router(chat_router, prefix="/chat")
+
 
 @app.get("/")
-def root():
-    return {
-        "message": "Canteen API is live",
-        "endpoints": {
-            "menu": "/recommend/menu",
-            "popular": "/recommend/popular",
-            "highest_rated": "/recommend/highest-rated",
-            "by_category": "/recommend/by-category?category=Lunch",
-            "chat_docs": "/docs",
-            "chat_post": "/chat/chat"
-        }
-    }
+def home():
+    return {"ok": True, "service": "canteen-chatbot-api", "routes": ["/chat/chat"]}
