@@ -1,14 +1,15 @@
 import os
-import pandas as pd
 import random
+from pathlib import Path
+from typing import List, Dict, Optional
+
+import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from google import genai
-from google.genai import types
 from pydantic import BaseModel, Field
-from typing import List
-from ML.API.recommend_api import load_orders, get_popular
+
+from ML.API.recommend_api import load_orders, get_menu, get_popular, get_highest_rated, find_by_category
 
 load_dotenv()
 
@@ -22,45 +23,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MENU_PATH = "ML/Data/raw/menu.csv"
+def _lazy_df() -> pd.DataFrame:
+    return load_orders()
 
-def load_menu():
-    df = pd.read_csv(MENU_PATH, encoding="utf-8-sig")
-    df.columns = [c.strip().lower() for c in df.columns]
-    if "item_name" not in df.columns:
-        raise ValueError("menu.csv must contain an 'item_name' column")
-    if "price" not in df.columns:
-        raise ValueError("menu.csv must contain a 'price' column")
-    if "available" not in df.columns:
-        df["available"] = True
-    df["available"] = df["available"].astype(str).str.lower().isin(["yes", "true", "1"])
-    return df
+def _menu_text() -> str:
+    df = get_menu(_lazy_df())
+    lines = [f"- {r.item_name} — ₹{r.price:.2f} ({r.category})" for r in df.itertuples(index=False)]
+    return "\n".join(lines)
 
-def menu_text():
-    df = load_menu()
-    return "\n".join([f"- {row['item_name']} — ₹{row['price']}" for _, row in df.iterrows()])
+def _specials(k: int = 2) -> List[str]:
+    df = get_menu(_lazy_df())
+    items = df["item_name"].tolist()
+    if not items:
+        return []
+    k = min(k, len(items))
+    return random.sample(items, k=k)
 
-def stock_status():
-    df = load_menu()
-    return {row["item_name"]: bool(row["available"]) for _, row in df.iterrows()}
+def _pop_rank() -> Dict[str, int]:
+    pop = get_popular(_lazy_df(), top_n=10)
+    return {r["item_name"]: i + 1 for i, r in enumerate(pop)}
 
-def specials():
-    df = load_menu()
-    if len(df) < 2:
-        return df["item_name"].tolist()
-    return random.sample(df["item_name"].tolist(), 2)
+def _top_rated(n: int = 10) -> List[Dict]:
+    return get_highest_rated(_lazy_df(), top_n=n)
 
-def popularity_rank():
-    orders = load_orders()
-    pop = get_popular(orders, top_n=10)
-    return {entry["item_name"]: i + 1 for i, entry in enumerate(pop)}
-
-def detect_mood(text):
+def _detect_intent(text: str) -> str:
     t = text.lower()
-    if any(x in t for x in ["tired", "sleepy"]): return "tired"
-    if any(x in t for x in ["sad", "upset", "down"]): return "sad"
-    if any(x in t for x in ["angry", "irritated"]): return "angry"
-    if any(x in t for x in ["hungry", "starving"]): return "hungry"
+    if any(k in t for k in ["highest rated", "highly rated", "top rated", "best rated", "high rating"]):
+        return "highest_rated"
+    if any(k in t for k in ["popular", "trending", "most ordered", "bestseller"]):
+        return "popular"
+    if any(k in t for k in ["recommend", "suggest", "what should i eat", "what to eat"]):
+        return "recommend"
+    if any(k in t for k in ["category:", "show category", "show me", "want", "craving"]):
+        return "category_maybe"
+    return "chat"
+
+def _extract_category(text: str) -> Optional[str]:
+    t = text.lower()
+    hints = ["snacks", "beverage", "beverages", "lunch", "breakfast", "noodles", "pizza", "thali", "roll", "sandwich", "tea", "coffee", "special"]
+    for h in hints:
+        if h in t:
+            if h == "beverages":
+                return "Beverage"
+            return h.capitalize()
     return None
 
 class Part(BaseModel):
@@ -71,89 +76,60 @@ class Content(BaseModel):
     parts: List[Part]
 
 class ChatRequest(BaseModel):
-    history: List[Content]
+    history: List[Content] = []
     new_message: str
 
 class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
 
-try:
-    gemini_client = genai.Client()
-    MODEL = "gemini-2.5-flash"
-except:
-    gemini_client = None
-
-def system_prompt(message):
-    m = detect_mood(message)
-    menu = menu_text()
-    stock = stock_status()
-    pop = popularity_rank()
-    sp = specials()
-    mood_hint = {
-        "tired": "User is tired. Suggest energy boosters like Cold Coffee.",
-        "hungry": "User is hungry. Suggest filling meals like Veg Thali or Paneer Thali.",
-        "sad": "User is sad. Suggest comfort foods like Maggi or Samosa.",
-        "angry": "User is irritated. Suggest quick items like Samosa."
-    }.get(m, "")
-    return f"""
-You are the intelligent and friendly canteen assistant.
-
-MENU:
-{menu}
-
-STOCK:
-{stock}
-
-POPULARITY:
-{pop}
-
-TODAY_SPECIALS:
-{sp}
-
-MOOD_HINT:
-{mood_hint}
-
-RULES:
-- Respond naturally to greetings.
-- Check STOCK strictly before confirming availability.
-- If an item is unavailable, say it is not available today.
-- If a user asks for recommendations, reply exactly in JSON:
-  {{"action":"recommend","query":"<user message>"}}
-- Only use menu items and prices from MENU.
-- If user asks for a non-menu item, say it is not available.
-- Keep responses concise, friendly, and helpful.
-"""
+def _format_list(items: List[Dict], key: str, second: Optional[str] = None, label: Optional[str] = None) -> str:
+    lines = []
+    for i, r in enumerate(items, 1):
+        if second and second in r:
+            lines.append(f"{i}. {r[key]} ({label or second}: {r[second]})")
+        else:
+            lines.append(f"{i}. {r[key]}")
+    return "\n".join(lines) if lines else "No items found."
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    if not gemini_client:
-        raise HTTPException(503, "AI unavailable")
-
-    prompt = system_prompt(request.new_message)
-
-    convo = [types.Content(role="user", parts=[types.Part(text=prompt)])]
-
-    for msg in request.history:
-        convo.append(
-            types.Content(
-                role=msg.role,
-                parts=[types.Part(text=p.text) for p in msg.parts]
-            )
-        )
-
-    convo.append(types.Content(role="user", parts=[types.Part(text=request.new_message)]))
-
     try:
-        res = gemini_client.models.generate_content(model=MODEL, contents=convo)
-        reply = res.text
-        updated_history = request.history + [
+        intent = _detect_intent(request.new_message)
+        if intent == "highest_rated":
+            items = _top_rated(8)
+            reply = "Top rated dishes:\n" + _format_list(items, "item_name", "rating", "rating")
+        elif intent == "popular":
+            items = get_popular(_lazy_df(), top_n=8)
+            reply = "Most popular right now:\n" + _format_list(items, "item_name", "score", "score")
+        elif intent == "category_maybe":
+            cat = _extract_category(request.new_message)
+            if cat:
+                items = find_by_category(cat, _lazy_df(), top_n=8)
+                if items and "rating" in items[0]:
+                    reply = f"Top items in {cat}:\n" + _format_list(items, "item_name", "rating", "rating")
+                else:
+                    reply = f"Popular items in {cat}:\n" + _format_list(items, "item_name", "score", "score")
+            else:
+                reply = "Please specify a category like Snacks, Beverage, Breakfast, Lunch, Pizza, Noodles, Thali, or Sandwich."
+        elif intent == "recommend":
+            rated = _top_rated(5)
+            picks = [r["item_name"] for r in rated[:3]]
+            reply = "You could try: " + ", ".join(picks) + ". Ask for 'highest rated' or 'popular' for more."
+        else:
+            menu = _menu_text()
+            specials = _specials(2)
+            pop = _pop_rank()
+            rated = _top_rated(3)
+            intro = "Hi! I’m your canteen assistant. I can suggest popular items, the highest rated dishes, or items by category.\n"
+            reply = intro + "\nToday's specials: " + (", ".join(specials) if specials else "none") + "\nTop rated: " + ", ".join([r["item_name"] for r in rated]) + "\nMenu:\n" + menu + "\nPopularity ranks (top 10): " + str(pop)
+        updated = request.history + [
             Content(role="user", parts=[Part(text=request.new_message)]),
             Content(role="model", parts=[Part(text=reply)])
         ]
-        return ChatResponse(reply=reply, updated_history=updated_history)
+        return ChatResponse(reply=reply, updated_history=updated)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, f"{e}")
 
 @app.get("/")
 def root():

@@ -1,78 +1,77 @@
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-from typing import Optional
+from typing import List, Dict, Optional
 import pandas as pd
-from datetime import timedelta
 
-app = FastAPI(title="Canteen Recommendation API", version="1.1.0")
+DATASET_PATH = Path(__file__).resolve().parents[1] / "Data" / "raw" / "canteen_recommendation_dataset.csv"
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-BASE_DIR = Path(__file__).resolve().parent
-ML_DIR = BASE_DIR.parent
-DATA_PATH = (ML_DIR / "Data" / "raw" / "mock_canteen_orders.csv").resolve()
-MODEL_PATH = (ML_DIR / "Model" / "trained_model.pkl").resolve()
-
-def load_orders() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH, encoding="utf-8-sig")
-    df.columns = df.columns.str.strip().str.lower()
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df = df.dropna(subset=["timestamp"])
+def _read_csv(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    df.columns = [c.strip() for c in df.columns]
+    if "datetime" in df.columns:
+        try:
+            df["datetime"] = pd.to_datetime(df["datetime"])
+        except Exception:
+            pass
     return df
 
-def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
-    df.columns = df.columns.str.strip().str.lower()
-    if "item_name" not in df.columns:
-        raise KeyError(f"item_name column missing. Columns found: {df.columns.tolist()}")
-    if days and "timestamp" in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
-            if df["timestamp"].dt.tz is not None:
-                df["timestamp"] = df["timestamp"].dt.tz_localize(None)
-            cutoff = pd.Timestamp.utcnow().tz_localize(None) - timedelta(days=days)
-            df = df[df["timestamp"] >= cutoff]
-    counts = df["item_name"].value_counts().reset_index()
-    counts.columns = ["item_name", "order_count"]
-    return counts.head(top_n).to_dict(orient="records")
+def load_orders() -> pd.DataFrame:
+    return _read_csv(DATASET_PATH)
 
-def try_personalized(user_id: str, top_n: int = 5):
-    try:
-        import joblib
-        data = joblib.load(MODEL_PATH)
-        pivot = data["pivot"]
-        item_sim = data["item_sim"]
-        if user_id not in pivot.index:
-            return None
-        user_vec = pivot.loc[user_id]
-        scores = (item_sim * user_vec).sum(axis=1).sort_values(ascending=False)
-        purchased = set(pivot.columns[user_vec > 0])
-        recs = [i for i in scores.index if i not in purchased][:top_n]
-        return [{"item_name": item, "source": "personalized"} for item in recs]
-    except Exception:
-        return None
+def get_menu(df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    if df is None:
+        df = load_orders()
+    cols = df.columns
+    need = {"item_name", "price"}
+    if not need.issubset(set(cols)):
+        raise KeyError(f"Required columns missing for menu: {sorted(need)}; found: {list(cols)}")
+    grouped = (
+        df.groupby("item_name", as_index=False)
+        .agg(
+            price=("price", "median"),
+            category=("category", "first"),
+        )
+    )
+    grouped["price"] = grouped["price"].round(2)
+    return grouped
 
-@app.get("/")
-def health():
-    return {"ok": True, "service": "canteen-recommendation-api"}
+def get_popular(df: Optional[pd.DataFrame] = None, top_n: int = 10) -> List[Dict]:
+    if df is None:
+        df = load_orders()
+    cols = set(df.columns)
+    if "item_name" not in cols:
+        raise KeyError(f"item_name column missing. Columns found: {list(df.columns)}")
+    if "purchase_count" in cols:
+        score = df.groupby("item_name", as_index=False)["purchase_count"].sum().rename(columns={"purchase_count": "score"})
+    elif "popularity_score" in cols:
+        score = df.groupby("item_name", as_index=False)["popularity_score"].mean().rename(columns={"popularity_score": "score"})
+    else:
+        freq = df["item_name"].value_counts().reset_index()
+        freq.columns = ["item_name", "score"]
+        score = freq
+    out = score.sort_values("score", ascending=False).head(top_n)
+    return [{"item_name": r["item_name"], "score": float(r["score"])} for _, r in out.iterrows()]
 
-@app.get("/recommend")
-def recommend(top_n: int = Query(5, ge=1, le=50), window_days: Optional[int] = Query(None, ge=1)):
-    df = load_orders()
-    recs = get_popular(df, top_n=top_n, days=window_days)
-    return {"mode": "popular", "top_n": top_n, "window_days": window_days, "recommendations": recs}
+def get_highest_rated(df: Optional[pd.DataFrame] = None, top_n: int = 10) -> List[Dict]:
+    if df is None:
+        df = load_orders()
+    cols = set(df.columns)
+    if not {"item_name", "rating"}.issubset(cols):
+        raise KeyError(f"Required columns missing for highest rated: item_name, rating; found: {list(df.columns)}")
+    rated = df.groupby("item_name", as_index=False)["rating"].mean()
+    rated["rating"] = rated["rating"].round(2)
+    out = rated.sort_values("rating", ascending=False).head(top_n)
+    return [{"item_name": r["item_name"], "rating": float(r["rating"])} for _, r in out.iterrows()]
 
-@app.get("/recommend/user/{user_id}")
-def recommend_user(user_id: str, top_n: int = Query(5, ge=1, le=50)):
-    recs = try_personalized(user_id, top_n=top_n)
-    if recs:
-        return {"mode": "personalized", "user_id": user_id, "top_n": top_n, "recommendations": recs}
-    df = load_orders()
-    fallback = get_popular(df, top_n=top_n)
-    return {"mode": "popular-fallback", "user_id": user_id, "top_n": top_n, "recommendations": fallback}
+def find_by_category(category: str, df: Optional[pd.DataFrame] = None, top_n: int = 10) -> List[Dict]:
+    if df is None:
+        df = load_orders()
+    mask = df["category"].str.lower() == category.lower()
+    sub = df[mask]
+    if sub.empty:
+        return []
+    if "rating" in sub.columns:
+        rated = sub.groupby("item_name", as_index=False)["rating"].mean().sort_values("rating", ascending=False).head(top_n)
+        return [{"item_name": r["item_name"], "rating": float(r["rating"])} for _, r in rated.iterrows()]
+    freq = sub["item_name"].value_counts().reset_index().head(top_n)
+    freq.columns = ["item_name", "score"]
+    return [{"item_name": r["item_name"], "score": int(r["score"])} for _, r in freq.iterrows()]
