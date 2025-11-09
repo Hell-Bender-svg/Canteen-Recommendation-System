@@ -1,67 +1,27 @@
-import os
-import pandas as pd
 import random
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from google import genai
-from google.genai import types
+import pandas as pd
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List
-from ML.API.recommend_api import load_orders, get_popular
+from google import genai
+from google.genai import types
 
-load_dotenv()
-
-app = FastAPI(title="Canteen Chatbot API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from ML.API.recommend_api import (
+    load_dataset,
+    get_menu,
+    get_popular,
+    get_highest_rated,
+    find_by_category,
+    spicy_items
 )
 
-MENU_PATH = "ML/Data/raw/menu.csv"
+router = APIRouter(prefix="/chat", tags=["chat"])
 
-def load_menu():
-    df = pd.read_csv(MENU_PATH, encoding="utf-8-sig")
-    df.columns = [c.strip().lower() for c in df.columns]
-    if "item_name" not in df.columns:
-        raise ValueError("menu.csv must contain an 'item_name' column")
-    if "price" not in df.columns:
-        raise ValueError("menu.csv must contain a 'price' column")
-    if "available" not in df.columns:
-        df["available"] = True
-    df["available"] = df["available"].astype(str).str.lower().isin(["yes", "true", "1"])
-    return df
+DATA_CACHE = load_dataset()
+MENU_CACHE = get_menu()
 
-def menu_text():
-    df = load_menu()
-    return "\n".join([f"- {row['item_name']} — ₹{row['price']}" for _, row in df.iterrows()])
-
-def stock_status():
-    df = load_menu()
-    return {row["item_name"]: bool(row["available"]) for _, row in df.iterrows()}
-
-def specials():
-    df = load_menu()
-    if len(df) < 2:
-        return df["item_name"].tolist()
-    return random.sample(df["item_name"].tolist(), 2)
-
-def popularity_rank():
-    orders = load_orders()
-    pop = get_popular(orders, top_n=10)
-    return {entry["item_name"]: i + 1 for i, entry in enumerate(pop)}
-
-def detect_mood(text):
-    t = text.lower()
-    if any(x in t for x in ["tired", "sleepy"]): return "tired"
-    if any(x in t for x in ["sad", "upset", "down"]): return "sad"
-    if any(x in t for x in ["angry", "irritated"]): return "angry"
-    if any(x in t for x in ["hungry", "starving"]): return "hungry"
-    return None
+client = genai.Client()
+MODEL = "gemini-2.5-flash"
 
 class Part(BaseModel):
     text: str
@@ -78,59 +38,87 @@ class ChatResponse(BaseModel):
     reply: str
     updated_history: List[Content]
 
-try:
-    gemini_client = genai.Client()
-    MODEL = "gemini-2.5-flash"
-except:
-    gemini_client = None
+def build_system_instruction():
+    menu = MENU_CACHE
+    popular = get_popular(10)
+    rated = get_highest_rated(10)
+    spicy = spicy_items()[:10]
 
-def system_prompt(message):
-    m = detect_mood(message)
-    menu = menu_text()
-    stock = stock_status()
-    pop = popularity_rank()
-    sp = specials()
-    mood_hint = {
-        "tired": "User is tired. Suggest energy boosters like Cold Coffee.",
-        "hungry": "User is hungry. Suggest filling meals like Veg Thali or Paneer Thali.",
-        "sad": "User is sad. Suggest comfort foods like Maggi or Samosa.",
-        "angry": "User is irritated. Suggest quick items like Samosa."
-    }.get(m, "")
+    menu_lines = [
+        f"- {m['item_name']} (₹{m['price']}) | Category: {m['category']} | Rating: {m.get('rating', 'N/A')}"
+        for m in menu
+    ]
+
+    pop_lines = [
+        f"{i+1}. {p['item_name']} — Popularity Score: {p.get('popularity_score', 0)}"
+        for i, p in enumerate(popular)
+    ]
+
+    rated_lines = [
+        f"{i+1}. {r['item_name']} — Rating: {r.get('rating', 0):.1f}/5"
+        for i, r in enumerate(rated)
+    ]
+
+    spicy_lines = [
+        f"{i+1}. {s['item_name']} — Spice Level: {s.get('spicy_level', 0)}"
+        for i, s in enumerate(spicy)
+    ]
+
     return f"""
-You are the intelligent and friendly canteen assistant.
+You are the official canteen chatbot.
+
+Rules:
+- Always answer using ONLY the information provided below.
+- Never invent prices or items.
+- Always use INR currency (₹). Never show $, USD, or convert currency.
+- If user asks something not in the menu, say it is not available.
+- Be friendly and conversational, but accurate.
+- When asked about price, say: "₹<amount>".
 
 MENU:
-{menu}
+{chr(10).join(menu_lines)}
 
-STOCK:
-{stock}
+POPULAR ITEMS:
+{chr(10).join(pop_lines)}
 
-POPULARITY:
-{pop}
+HIGHEST RATED:
+{chr(10).join(rated_lines)}
 
-TODAY_SPECIALS:
-{sp}
-
-MOOD_HINT:
-{mood_hint}
-
-RULES:
-- Respond naturally to greetings.
-- Check STOCK strictly before confirming availability.
-- If an item is unavailable, say it is not available today.
-- If a user asks for recommendations, reply exactly in JSON:
-  {{"action":"recommend","query":"<user message>"}}
-- Only use menu items and prices from MENU.
-- If user asks for a non-menu item, say it is not available.
-- Keep responses concise, friendly, and helpful.
+SPICY ITEMS:
+{chr(10).join(spicy_lines)}
 """
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    if not gemini_client:
-        raise HTTPException(503, "AI unavailable")
+# ✅ FIXED GREETING DETECTION (NO FALSE MATCHES)
+def is_greeting(text: str):
+    t = text.lower().strip()
+    words = t.split()
 
-    prompt = system_prompt(request.new_message)
+    greetings = {"hi", "hello", "hey", "hola", "yo", "sup"}
+
+    # Only treat as greeting if the whole message is a greeting word
+    return len(words) == 1 and words[0] in greetings
+
+def greeting_reply():
+    return random.choice([
+        "Hey! What can I get you today? 😊",
+        "Hello! Hungry for something yummy? 🍽️",
+        "Hi! What are you craving today? 😄",
+        "Hey there! Looking for something tasty? 😁"
+    ])
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+
+    # ✅ Safe greeting logic
+    if is_greeting(request.new_message):
+        reply = greeting_reply()
+        updated = request.history + [
+            Content(role="user", parts=[Part(text=request.new_message)]),
+            Content(role="model", parts=[Part(text=reply)])
+        ]
+        return ChatResponse(reply=reply, updated_history=updated)
+
+    prompt = build_system_instruction()
 
     convo = [types.Content(role="user", parts=[types.Part(text=prompt)])]
 
@@ -142,19 +130,26 @@ async def chat(request: ChatRequest):
             )
         )
 
-    convo.append(types.Content(role="user", parts=[types.Part(text=request.new_message)]))
+    convo.append(
+        types.Content(role="user", parts=[types.Part(text=request.new_message)])
+    )
 
     try:
-        res = gemini_client.models.generate_content(model=MODEL, contents=convo)
+        res = client.models.generate_content(
+            model=MODEL,
+            contents=convo
+        )
         reply = res.text
-        updated_history = request.history + [
-            Content(role="user", parts=[Part(text=request.new_message)]),
-            Content(role="model", parts=[Part(text=reply)])
-        ]
-        return ChatResponse(reply=reply, updated_history=updated_history)
     except Exception as e:
         raise HTTPException(500, str(e))
 
-@app.get("/")
-def root():
-    return {"msg": "Chatbot Live ✅"}
+    updated = request.history + [
+        Content(role="user", parts=[Part(text=request.new_message)]),
+        Content(role="model", parts=[Part(text=reply)])
+    ]
+
+    return ChatResponse(reply=reply, updated_history=updated)
+
+@router.get("/")
+def ping():
+    return {"ok": True, "message": "Chatbot API online"}

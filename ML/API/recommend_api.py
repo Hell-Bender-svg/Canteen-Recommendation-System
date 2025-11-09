@@ -1,78 +1,136 @@
-from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-from typing import Optional
 import pandas as pd
-from datetime import timedelta
+from fastapi import APIRouter, HTTPException
 
-app = FastAPI(title="Canteen Recommendation API", version="1.1.0")
+router = APIRouter(prefix="/recommend", tags=["recommend"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+DATA_PATH = "ML/Data/raw/canteen_recommendation_dataset.csv"
+MENU_PATH = "ML/Data/raw/menu.csv"
 
-BASE_DIR = Path(__file__).resolve().parent
-ML_DIR = BASE_DIR.parent
-DATA_PATH = (ML_DIR / "Data" / "raw" / "mock_canteen_orders.csv").resolve()
-MODEL_PATH = (ML_DIR / "Model" / "trained_model.pkl").resolve()
-
-def load_orders() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH, encoding="utf-8-sig")
-    df.columns = df.columns.str.strip().str.lower()
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df = df.dropna(subset=["timestamp"])
-    return df
-
-def get_popular(df: pd.DataFrame, top_n: int = 5, days: Optional[int] = None):
-    df.columns = df.columns.str.strip().str.lower()
-    if "item_name" not in df.columns:
-        raise KeyError(f"item_name column missing. Columns found: {df.columns.tolist()}")
-    if days and "timestamp" in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
-            if df["timestamp"].dt.tz is not None:
-                df["timestamp"] = df["timestamp"].dt.tz_localize(None)
-            cutoff = pd.Timestamp.utcnow().tz_localize(None) - timedelta(days=days)
-            df = df[df["timestamp"] >= cutoff]
-    counts = df["item_name"].value_counts().reset_index()
-    counts.columns = ["item_name", "order_count"]
-    return counts.head(top_n).to_dict(orient="records")
-
-def try_personalized(user_id: str, top_n: int = 5):
+def load_dataset():
     try:
-        import joblib
-        data = joblib.load(MODEL_PATH)
-        pivot = data["pivot"]
-        item_sim = data["item_sim"]
-        if user_id not in pivot.index:
-            return None
-        user_vec = pivot.loc[user_id]
-        scores = (item_sim * user_vec).sum(axis=1).sort_values(ascending=False)
-        purchased = set(pivot.columns[user_vec > 0])
-        recs = [i for i in scores.index if i not in purchased][:top_n]
-        return [{"item_name": item, "source": "personalized"} for item in recs]
-    except Exception:
-        return None
+        df = pd.read_csv(DATA_PATH)
+        df.columns = df.columns.str.strip()
+        return df
+    except FileNotFoundError:
+        raise HTTPException(404, "Recommendation dataset file not found")
+    except Exception as e:
+        raise HTTPException(500, f"Error loading dataset: {str(e)}")
 
-@app.get("/")
-def health():
-    return {"ok": True, "service": "canteen-recommendation-api"}
+def load_menu():
+    try:
+        df = pd.read_csv(MENU_PATH)
+        df.columns = df.columns.str.strip()
+        return df
+    except FileNotFoundError:
+        raise HTTPException(404, "Menu file not found")
+    except Exception as e:
+        raise HTTPException(500, f"Error loading menu: {str(e)}")
 
-@app.get("/recommend")
-def recommend(top_n: int = Query(5, ge=1, le=50), window_days: Optional[int] = Query(None, ge=1)):
-    df = load_orders()
-    recs = get_popular(df, top_n=top_n, days=window_days)
-    return {"mode": "popular", "top_n": top_n, "window_days": window_days, "recommendations": recs}
+@router.get("/menu")
+def get_menu():
+    menu_df = load_menu()
+    return menu_df.to_dict(orient="records")
 
-@app.get("/recommend/user/{user_id}")
-def recommend_user(user_id: str, top_n: int = Query(5, ge=1, le=50)):
-    recs = try_personalized(user_id, top_n=top_n)
-    if recs:
-        return {"mode": "personalized", "user_id": user_id, "top_n": top_n, "recommendations": recs}
-    df = load_orders()
-    fallback = get_popular(df, top_n=top_n)
-    return {"mode": "popular-fallback", "user_id": user_id, "top_n": top_n, "recommendations": fallback}
+@router.get("/popular")
+def get_popular(top_n: int = 10):
+    df = load_dataset()
+    
+    if "popularity_score" not in df.columns:
+        raise HTTPException(400, "Dataset missing popularity_score column")
+    
+    if "item_name" not in df.columns:
+        raise HTTPException(400, "Dataset missing item_name column")
+    
+    popular_df = df.groupby("item_name", as_index=False)["popularity_score"].mean()
+    popular_df = popular_df.sort_values("popularity_score", ascending=False).head(top_n)
+    
+    return popular_df.to_dict(orient="records")
+
+@router.get("/highest-rated")
+def get_highest_rated(top_n: int = 10):
+    df = load_dataset()
+    
+    if "rating" not in df.columns:
+        raise HTTPException(400, "Dataset missing rating column")
+    
+    if "item_name" not in df.columns:
+        raise HTTPException(400, "Dataset missing item_name column")
+    
+    rated_df = df.groupby("item_name", as_index=False)["rating"].mean()
+    rated_df = rated_df.sort_values("rating", ascending=False).head(top_n)
+    
+    return rated_df.to_dict(orient="records")
+
+@router.get("/category/{cat}")
+def find_by_category(cat: str, top_n: int = 10):
+    df = load_dataset()
+    
+    if "category" not in df.columns:
+        raise HTTPException(400, "Dataset missing category column")
+    
+    filtered_df = df[df["category"].str.lower().str.strip() == cat.lower().strip()]
+    
+    if filtered_df.empty:
+        return []
+    
+    if "popularity_score" in filtered_df.columns and "item_name" in filtered_df.columns:
+        result_df = filtered_df.groupby("item_name", as_index=False)["popularity_score"].mean()
+        result_df = result_df.sort_values("popularity_score", ascending=False).head(top_n)
+    else:
+        result_df = filtered_df[["item_name"]].drop_duplicates().head(top_n)
+    
+    return result_df.to_dict(orient="records")
+
+@router.get("/spicy")
+def spicy_items():
+    df = load_dataset()
+    
+    if "spicy_level" not in df.columns:
+        return []
+    
+    spicy_map = {
+        'Mild': 1,
+        'Medium': 2,
+        'Spicy': 3
+    }
+    
+    df['spicy_level_numeric'] = df['spicy_level'].map(spicy_map)
+    
+    spicy_df = df[df['spicy_level_numeric'] >= 3].copy()
+    
+    if spicy_df.empty:
+        return []
+    
+    if "item_name" in spicy_df.columns:
+        result_df = spicy_df.groupby("item_name", as_index=False)["spicy_level_numeric"].mean()
+        result_df = result_df.rename(columns={"spicy_level_numeric": "spicy_level"})
+        result_df = result_df.sort_values("spicy_level", ascending=False)
+        return result_df.to_dict(orient="records")
+    
+    return []
+
+@router.get("/search/{query}")
+def search_items(query: str):
+    menu_df = load_menu()
+    
+    if "item_name" not in menu_df.columns:
+        raise HTTPException(400, "Menu missing item_name column")
+    
+    query_lower = query.lower().strip()
+    matches = menu_df[menu_df["item_name"].str.lower().str.contains(query_lower, na=False)]
+    
+    return matches.to_dict(orient="records")
+
+@router.get("/item/{item_name}")
+def get_item_details(item_name: str):
+    menu_df = load_menu()
+    
+    if "item_name" not in menu_df.columns:
+        raise HTTPException(400, "Menu missing item_name column")
+    
+    item = menu_df[menu_df["item_name"].str.lower().str.strip() == item_name.lower().strip()]
+    
+    if item.empty:
+        raise HTTPException(404, f"Item '{item_name}' not found in menu")
+    
+    return item.to_dict(orient="records")[0]

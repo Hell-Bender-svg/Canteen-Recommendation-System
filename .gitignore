@@ -1,4 +1,6 @@
-# Ignore Python cache & build files
+# ============================================
+# PYTHON FILES & CACHES
+# ============================================
 __pycache__/
 *.pyc
 *.pyo
@@ -6,107 +8,55 @@ __pycache__/
 *.pkl
 *.log
 
-# Ignore virtual environments
+# ============================================
+# VIRTUAL ENVIRONMENTS
+# ============================================
 venv/
 env/
 .venv/
 
-# Ignore Jupyter checkpoints
+# ============================================
+# JUPYTER NOTEBOOK CHECKPOINTS
+# ============================================
 .ipynb_checkpoints/
 
-# Ignore system files
+# ============================================
+# SYSTEM FILES
+# ============================================
 .DS_Store
 Thumbs.db
 
-# Ignore IDE settings
+# ============================================
+# IDE / EDITOR SETTINGS
+# ============================================
 .vscode/
 .idea/
 
-# Ignore raw data except the main dataset
+# ============================================
+# RAW DATA
+# Ignore everything EXCEPT the two needed files
+# ============================================
 ML/Data/raw/*
 !ML/Data/raw/canteen_recommendation_dataset.csv
+!ML/Data/raw/menu.csv
 
-# Ignore processed data except final
+# ============================================
+# PROCESSED DATA
+# Track only the final dataset
+# ============================================
 ML/Data/processed/*
 !ML/Data/processed/canteen_data_final.csv
 
-# Ignore model artifacts unless needed
+# ============================================
+# MODEL ARTIFACTS
+# (ignored unless you explicitly want to version them)
+# ============================================
 *.h5
 *.joblib
 *.sav
 *.pt
 
-# Ignore render build artifacts
+# ============================================
+# RENDER BUILD ARTIFACTS
+# ============================================
 .render-build/
-# Ignore Python cache & build files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.pkl
-*.log
-
-# Ignore virtual environments
-venv/
-env/
-.venv/
-
-# Ignore Jupyter checkpoints
-.ipynb_checkpoints/
-
-# Ignore system files
-.DS_Store
-Thumbs.db
-
-# Ignore IDE settings
-.vscode/
-.idea/
-
-# Ignore raw data except the main dataset
-ML/Data/raw/*
-!ML/Data/raw/canteen_recommendation_dataset.csv
-
-# Ignore processed data except final
-ML/Data/processed/*
-# Ignore Python cache & build files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.pkl
-*.log
-
-# Ignore virtual environments
-venv/
-env/
-.venv/
-
-# Ignore Jupyter checkpoints
-.ipynb_checkpoints/
-
-# Ignore system files
-.DS_Store
-Thumbs.db
-
-# Ignore IDE settings
-.vscode/
-.idea/
-
-# Ignore raw data except the main dataset
-ML/Data/raw/*
-!ML/Data/raw/canteen_recommendation_dataset.csv
-
-# Ignore processed data except final
-ML/Data/processed/*
-!ML/Data/processed/canteen_data_final.csv
-
-# Ignore model artifacts unless needed
-*.h5
-*.joblib
-*.sav
-*.pt
-
-# Ignore render build artifacts
-.render-build/
-
-
