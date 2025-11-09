@@ -1,7 +1,6 @@
 import os
-import random
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List
 from dotenv import load_dotenv
@@ -36,48 +35,46 @@ class ChatResponse(BaseModel):
 def _safe(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except:
+    except Exception:
         return None
 
-def _menu_text():
+def _menu_text() -> str:
     m = _safe(get_menu) or []
     if not m:
         return "Menu unavailable."
-    return "\n".join([f"- {row.get('item_name')} — ₹{row.get('price')} ({row.get('category')})" for row in m])
+    lines = [f"- {row.get('item_name')} — ₹{row.get('price')} ({row.get('category')})" for row in m]
+    return "\n".join(lines)
 
-def _popular_text():
+def _popular_text() -> str:
     p = _safe(get_popular, 10) or []
     if not p:
         return "No popularity data."
-    return "\n".join([f"{i+1}. {r.get('item_name')} — score {r.get('score')}" for i, r in enumerate(p)])
+    lines = [f"{i+1}. {r.get('item_name')} — score {r.get('score')}" for i, r in enumerate(p)]
+    return "\n".join(lines)
 
-def _rated_text():
+def _rated_text() -> str:
     r = _safe(get_highest_rated, 10) or []
     if not r:
         return "No rating data."
-    return "\n".join([
-        f"{i+1}. {row.get('item_name')} — avg rating {round(float(row.get('rating', 0)),2)}"
-        for i, row in enumerate(r)
-    ])
+    lines = [f"{i+1}. {row.get('item_name')} — avg rating {round(float(row.get('rating', 0)),2) if 'rating' in row else row.get('score')}" for i, row in enumerate(r)]
+    return "\n".join(lines)
 
-def _category_text(cat: str):
+def _category_text(cat: str) -> str:
     items = _safe(find_by_category, cat, 10) or []
     if not items:
         return f"No items found for category '{cat}'."
-    return "\n".join([
-        f"{i+1}. {r.get('item_name')} — score {round(float(r.get('score', 0)),2)}"
-        for i, r in enumerate(items)
-    ])
+    lines = [f"{i+1}. {r.get('item_name')} — score {round(float(r.get('score', 0)),2) if isinstance(r.get('score'), (int,float)) else r.get('score')}" for i, r in enumerate(items)]
+    return "\n".join(lines)
 
-def _rule_based_reply(text: str):
+def _rule_based_reply(text: str) -> str:
     t = text.lower()
-    if "menu" in t or "list items" in t:
-        return f"Here is the menu:\n{_menu_text()}"
-    if "popular" in t or "trending" in t:
-        return f"Top popular picks:\n{_popular_text()}"
+    if any(k in t for k in ["menu", "show menu", "list items"]):
+        return f"Here is the current menu:\n{_menu_text()}"
+    if "popular" in t or "trending" in t or "most ordered" in t:
+        return f"Top popular picks right now:\n{_popular_text()}"
     if "highest rated" in t or "high rating" in t or "best rated" in t:
         return f"Highest rated dishes:\n{_rated_text()}"
-    if "category" in t and "suggest" in t:
+    if "suggest" in t and "category" in t:
         parts = t.split("category")
         cat = parts[-1].strip(": ,.")
         return f"Top items in category '{cat}':\n{_category_text(cat)}"
@@ -85,33 +82,16 @@ def _rule_based_reply(text: str):
         return f"Breakfast ideas:\n{_category_text('Breakfast')}"
     if "lunch" in t:
         return f"Lunch ideas:\n{_category_text('Lunch')}"
-    if "snack" in t:
+    if "snack" in t or "snacks" in t:
         return f"Snack ideas:\n{_category_text('Snacks')}"
-    return "I can show the menu, popular items, highest-rated dishes, or category suggestions. Try: 'show menu', 'popular items', 'highest rated', or 'suggest category Lunch'."
+    return "Hi! I can show the menu, popular items, highest-rated dishes, or suggestions by category. Try: 'show menu', 'popular items', 'highest rated', or 'suggest category Lunch'."
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    msg = request.new_message.lower().strip()
-    greetings = ["hi", "hello", "hey", "yo", "sup", "hii", "hiii", "hola"]
-
-    if msg in greetings or any(msg.startswith(g) for g in greetings):
-        reply = random.choice([
-            "Hey! What’s cookin'? 😊",
-            "Hello! Hungry for something tasty? 😄",
-            "Hi! What can I get you today? 🍽️",
-            "Hey there! Feeling hungry? 😁"
-        ])
-        updated = request.history + [
-            Content(role="user", parts=[Part(text=request.new_message)]),
-            Content(role="model", parts=[Part(text=reply)])
-        ]
-        return ChatResponse(reply=reply, updated_history=updated)
-
     reply = _rule_based_reply(request.new_message)
-
     updated = request.history + [
         Content(role="user", parts=[Part(text=request.new_message)]),
-        Content(role="model", parts=[Part(text=reply)])
+        Content(role="model", parts=[Part(text=reply)]),
     ]
     return ChatResponse(reply=reply, updated_history=updated)
 
