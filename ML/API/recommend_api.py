@@ -88,8 +88,15 @@ def spicy_items():
     if "spicy_level" not in df.columns:
         return []
     
-    df["spicy_level_numeric"] = pd.to_numeric(df["spicy_level"], errors="coerce")
-    spicy_df = df[df["spicy_level_numeric"] >= 3].copy()
+    spicy_map = {
+        'Mild': 1,
+        'Medium': 2,
+        'Spicy': 3
+    }
+    
+    df['spicy_level_numeric'] = df['spicy_level'].map(spicy_map)
+    
+    spicy_df = df[df['spicy_level_numeric'] >= 3].copy()
     
     if spicy_df.empty:
         return []

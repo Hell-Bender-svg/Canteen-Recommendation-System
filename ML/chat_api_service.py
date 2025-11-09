@@ -62,12 +62,12 @@ def create_system_instruction():
     
     menu_items = []
     for item in data['menu']:
-        menu_items.append(f"- {item['item_name']} (₹{item['price']}) [{item.get('category', 'General')}]")
+        menu_items.append(f"- {item['item_name']} (₹{item['price']}) [{item.get('category', 'General')}] Rating: {item.get('rating', 'N/A')}/5")
     
     popular_items = []
     for idx, item in enumerate(data['popular'], 1):
         score = item.get('popularity_score', 0)
-        popular_items.append(f"{idx}. {item['item_name']} (Popularity: {score})")
+        popular_items.append(f"{idx}. {item['item_name']} (Popularity Score: {score:.1f})")
     
     rated_items = []
     for idx, item in enumerate(data['highest_rated'], 1):
@@ -77,59 +77,59 @@ def create_system_instruction():
     spicy_items_list = []
     for idx, item in enumerate(data['spicy'], 1):
         level = item.get('spicy_level', 0)
-        spicy_items_list.append(f"{idx}. {item['item_name']} (Spice Level: {level})")
+        spicy_items_list.append(f"{idx}. {item['item_name']} (Spice Level: {level:.1f})")
     
     return f"""You are the friendly college canteen chatbot assistant. Help students find food they'll love!
 
-COMPLETE MENU:
+COMPLETE MENU (ALL ITEMS WITH PRICES AND RATINGS):
 {chr(10).join(menu_items)}
 
-TOP 10 MOST POPULAR ITEMS:
+TOP 10 MOST POPULAR ITEMS (BY POPULARITY SCORE):
 {chr(10).join(popular_items)}
 
-TOP 10 HIGHEST RATED ITEMS:
+TOP 10 HIGHEST RATED ITEMS (BY CUSTOMER RATINGS):
 {chr(10).join(rated_items)}
 
-SPICY ITEMS (Spice Level 3+):
-{chr(10).join(spicy_items_list) if spicy_items_list else "No spicy items available"}
+SPICY ITEMS (Spice Level 3 or higher):
+{chr(10).join(spicy_items_list) if spicy_items_list else "No spicy items available currently"}
 
-YOUR ROLE:
-1. Be friendly, casual, and helpful - like talking to a friend
-2. ONLY recommend items from the menu above - never invent items
-3. When asked about prices, use exact prices from the menu
-4. When asked for popular items, use the popularity list above
-5. When asked for highest rated items, use the ratings list above
-6. If someone asks about an item not on the menu, politely say it's unavailable
-7. Consider meal times - suggest breakfast items in morning, lunch items midday, snacks in evening
-8. You can suggest combos using available items
-9. Be concise but friendly
-10. Use emojis occasionally to be engaging
+YOUR INSTRUCTIONS:
+1. ALWAYS use the exact data provided above when answering questions
+2. When asked for "highest rated" or "best rated" items, use the HIGHEST RATED list above
+3. When asked for "popular" items, use the MOST POPULAR list above
+4. When asked for "spicy" items, use the SPICY ITEMS list above
+5. When asked about prices, use the exact prices from the COMPLETE MENU
+6. NEVER invent or make up any items, prices, ratings, or information
+7. If asked about an item not in the menu, say it's unavailable
+8. Be friendly and conversational but always accurate
+9. You can suggest meal combinations using only items from the menu
+10. Consider meal times when suggesting items
 
-NEVER make up item names, prices, or ratings. Always use the data provided above."""
+RESPONSE FORMAT:
+- Keep responses natural and friendly
+- Use emojis occasionally
+- Be concise but helpful
+- Always base answers on the data above
+
+Remember: Accuracy is critical. Only use information from the lists above."""
 
 def quick_response(msg: str):
     t = msg.lower().strip()
     
-    if len(t) < 20 and any(g in t for g in ["hi", "hello", "hey", "hii", "helo"]):
+    simple_greetings = ["hi", "hello", "hey"]
+    if len(t) <= 10 and t in simple_greetings:
         return random.choice([
-            "Hey! What's cooking today? 😄",
-            "Hello! Ready to grab something yummy? 😋",
-            "Hi there! What can I help you with? 🍽️",
-            "Hey! Looking for something delicious? 🌟"
+            "Hey! What can I help you with today? 😊",
+            "Hello! Looking for something to eat? 🍽️",
+            "Hi there! How can I assist you? 🌟"
         ])
     
-    if len(t) < 25 and any(g in t for g in ["bye", "goodbye", "see you", "later"]):
+    simple_goodbyes = ["bye", "goodbye", "thanks", "thank you"]
+    if len(t) <= 15 and t in simple_goodbyes:
         return random.choice([
-            "Goodbye! Enjoy your meal! 😊",
-            "See you later! Come back soon! 👋",
-            "Bye! Hope you find something tasty! 🍴"
-        ])
-    
-    if len(t) < 25 and any(g in t for g in ["thanks", "thank you", "thx", "thanku"]):
-        return random.choice([
-            "You're welcome! 😊",
-            "Happy to help! 🌟",
-            "Anytime! Enjoy! 😋"
+            "You're welcome! Enjoy your meal! 😊",
+            "Happy to help! 👋",
+            "Anytime! Have a great day! 🌟"
         ])
     
     return None
@@ -172,8 +172,8 @@ async def chat(request: ChatRequest):
             contents=convo,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.7,
-                max_output_tokens=500
+                temperature=0.3,
+                max_output_tokens=800
             )
         )
         
