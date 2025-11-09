@@ -107,7 +107,8 @@ class ContentBasedRecommender:
     )
 
     
-        df_raw = pd.read_csv("/Users/Jaishreenirmala/Desktop/Canteen-Recommendation-System/ML/Data/raw/canteen_recommendation_dataset.csv")
+        df_raw = pd.read_csv(self.data_path)
+
 
     
         item_info = df_raw[["item_id", "item_name", "category", "price"]].drop_duplicates()

@@ -1,4 +1,4 @@
-# API/general_recommendation_api.py
+
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -10,15 +10,15 @@ import traceback
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../ML/Model")))
 
-from ML.Model.general_recommendation import ContentBasedRecommender
+from Model.general_recommendation import ContentBasedRecommender
 
 
 
 app = FastAPI(title="Canteen General Recommendation API")
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR,"Data", "raw", "canteen_recommendation_dataset.csv")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Go one level up from /API
+DATA_PATH = os.path.join(BASE_DIR, "Data", "raw", "canteen_recommendation_dataset.csv")
 
 print("📁 BASE_DIR:", BASE_DIR)
 print("📁 DATA_PATH:", DATA_PATH)
@@ -26,6 +26,7 @@ print("📁 Exists?", os.path.exists(DATA_PATH))
 
 if not os.path.exists(DATA_PATH):
     raise FileNotFoundError(f"Dataset not found at {DATA_PATH}")
+
 
 
 df_raw = pd.read_csv(DATA_PATH)
