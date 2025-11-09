@@ -88,10 +88,15 @@ SPICY ITEMS:
 {chr(10).join(spicy_lines)}
 """
 
+# ✅ FIXED GREETING DETECTION (NO FALSE MATCHES)
 def is_greeting(text: str):
     t = text.lower().strip()
-    greetings = ["hi", "hello", "hey", "yo", "hii", "hiii", "hola"]
-    return t in greetings or any(t.startswith(g) for g in greetings)
+    words = t.split()
+
+    greetings = {"hi", "hello", "hey", "hola", "yo", "sup"}
+
+    # Only treat as greeting if the whole message is a greeting word
+    return len(words) == 1 and words[0] in greetings
 
 def greeting_reply():
     return random.choice([
@@ -103,6 +108,8 @@ def greeting_reply():
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+
+    # ✅ Safe greeting logic
     if is_greeting(request.new_message):
         reply = greeting_reply()
         updated = request.history + [
