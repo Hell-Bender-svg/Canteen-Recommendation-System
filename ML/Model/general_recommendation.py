@@ -7,8 +7,17 @@ import pickle
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR, "../../ML/Data/raw/canteen_recommendation_dataset.csv")
+DATA_PATH = os.path.join(BASE_DIR, "../../Data/raw/canteen_recommendation_dataset.csv")
 
+print("📁 BASE_DIR:", BASE_DIR)
+print("📁 DATA_PATH:", DATA_PATH)
+print("📁 Exists?", os.path.exists(DATA_PATH))
+
+if not os.path.exists(DATA_PATH):
+    raise FileNotFoundError(f"Dataset not found at {DATA_PATH}")
+
+
+df_raw = pd.read_csv(DATA_PATH)
 class ContentBasedRecommender:
     def __init__(self, data_path="data/canteen_recommendation_dataset.csv"):
        

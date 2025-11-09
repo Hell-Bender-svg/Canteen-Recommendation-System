@@ -7,26 +7,34 @@ import sys, os
 import pandas as pd
 import traceback
 
-# Add path to access ML/Model
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../ML/Model")))
 
 from ML.Model.general_recommendation import ContentBasedRecommender
 
 
-# Initialize FastAPI app
+
 app = FastAPI(title="Canteen General Recommendation API")
 
-# Path to dataset and model
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR, "../../Ml/Data/raw/canteen_recommendation_dataset.csv")
+DATA_PATH = os.path.join(BASE_DIR, "../../Data/raw/canteen_recommendation_dataset.csv")
+
+print("📁 BASE_DIR:", BASE_DIR)
+print("📁 DATA_PATH:", DATA_PATH)
+print("📁 Exists?", os.path.exists(DATA_PATH))
+
+if not os.path.exists(DATA_PATH):
+    raise FileNotFoundError(f"Dataset not found at {DATA_PATH}")
+
 
 df_raw = pd.read_csv(DATA_PATH)
 MODEL_PATH = os.path.abspath("../ML/Model/item_similarity.pkl")
 
-# Initialize recommender
+
 recommender = ContentBasedRecommender(DATA_PATH)
 
-# Load pre-trained similarity matrix if available
+
 try:
     recommender.load_model(MODEL_PATH)
     print("✅ Loaded existing similarity model.")
